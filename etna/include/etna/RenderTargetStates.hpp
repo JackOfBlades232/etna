@@ -27,11 +27,14 @@ public:
         vk::ClearDepthStencilValue clearDepthStencilValue = {1.0f, 0};
         AttachmentParams() = default;
         AttachmentParams(vk::Image i, vk::ImageView v) : image(i), view(v) {}
+        AttachmentParams(vk::Image i, vk::ImageView v, vk::AttachmentLoadOp load, vk::AttachmentStoreOp store) 
+          : image(i), view(v), loadOp(load), storeOp(store) {}
         AttachmentParams(const Image &img) : image(img.get()), view(img.getView({})) {}
     };
     
-    RenderTargetState(VkCommandBuffer cmd_buff, vk::Extent2D extend,
+    RenderTargetState(VkCommandBuffer cmd_buff, vk::Rect2D rect,
     const std::vector<AttachmentParams> &color_attachments, AttachmentParams depth_attachment);
+
     ~RenderTargetState();
 };
 
