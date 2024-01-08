@@ -49,6 +49,9 @@ do                                              \
 }                                               \
 while (0)
 
+#define ETNA_VK_ASSERTF(expr, fmtStr, ...) ETNA_ASSERTF(expr == vk::Result::eSuccess, fmtStr, __VA_ARGS__)
+#define ETNA_VK_ASSERT(expr) ETNA_ASSERT(expr == vk::Result::eSuccess)
+
 // NOTE: unsanitary macro for customizing vulkan.hpp
 // Do NOT use in app code!
 #define ETNA_VULKAN_HPP_ASSERT_ON_RESULT(expr) ETNA_ASSERTF(expr, "{}", message)

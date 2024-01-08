@@ -3,6 +3,7 @@
 #define ETNA_COPY_HELPER_HPP_INCLUDED
 
 #include <vector>
+#include <functional>
 #include <etna/Buffer.hpp>
 #include <etna/Vulkan.hpp>
 
@@ -18,12 +19,12 @@ public:
   ~CopyHelper();
 
   Buffer createStagingBuffer(std::size_t size, const char *name = nullptr);
-  void copyBufferToBuffer(Buffer &dst, Buffer &src, std::vector<vk::BufferCopy> regions);
+  void copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions);
+  void updateBuffer(Buffer &dst, vk::DeviceSize dstOffset,
+                    const std::byte *src, std::size_t size, 
+                    Buffer *stagingBuff = nullptr);
 
   /* @TODO:
-  * Sort out regions API
-  * Small buffer update
-  * Move fill/fillOnce/update here (so as to choose between small and regular update)
   * Impl read buffer
   * Implement load for images
   * @HUH: do we need update/read/staging for images?
@@ -37,6 +38,12 @@ private:
   vk::Queue transferQueue;
   vk::CommandPool cmdPool;
   vk::CommandBuffer cmdBuff;
+
+  static constexpr std::size_t SMALL_BUFF_SIZE = 65536;
+
+  // @TODO: improve, this is unclear
+  // @NOTE: cmds must be [...](cmdBuff){cmdBuff.cmd***(); xN}
+  void executeCommands(const std::function<void(vk::CommandBuffer &)> &cmds);
 };
 
 }
