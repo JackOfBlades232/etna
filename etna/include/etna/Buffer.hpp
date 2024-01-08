@@ -2,6 +2,8 @@
 #ifndef ETNA_BUFFER_HPP_INCLUDED
 #define ETNA_BUFFER_HPP_INCLUDED
 
+#include <optional>
+#include <string_view>
 #include <etna/Vulkan.hpp>
 #include <vk_mem_alloc.h>
 
@@ -38,8 +40,16 @@ public:
 
   BufferBinding genBinding(vk::DeviceSize offset = 0, vk::DeviceSize range = VK_WHOLE_SIZE) const;
 
+  // @TODO: make a restriction? (buffer is cpu visible)
   std::byte* map();
   void unmap();
+
+  // @TODO: deal with sizes and regions properly
+  void createUpdateBuffer(std::size_t size);
+  void setUpdateBuffer(const std::shared_ptr<Buffer> &buff);
+  void fill(std::byte *src, std::size_t size);
+  void fillOnce(std::byte *src, std::size_t size);
+  void update(std::byte *src, std::size_t size);
 
   ~Buffer();
   void reset();
@@ -50,6 +60,8 @@ private:
   VmaAllocation allocation{};
   vk::Buffer buffer{};
   std::byte* mapped{};
+
+  std::shared_ptr<Buffer> updateStagingBuffer{};
 };
 
 }

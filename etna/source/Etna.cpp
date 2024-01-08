@@ -66,6 +66,7 @@ namespace etna
   {
     const auto block_size = vk::blockSize(info.format);
     const auto image_size = block_size * info.extent.width * info.extent.height * info.extent.depth;
+    // @TODO: move to copy helper
     etna::Buffer staging_buf = g_context->createBuffer(etna::Buffer::CreateInfo
     {
       .size = image_size, 

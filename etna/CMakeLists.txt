@@ -10,6 +10,7 @@ add_library(etna
   "source/Buffer.cpp"
   "source/PipelineBase.cpp"
   "source/PipelineManager.cpp"
+  "source/CopyHelper.cpp"
   "source/VmaImplementation.cpp"
   "source/ShaderProgram.cpp"
   "source/DescriptorSetLayout.cpp"
