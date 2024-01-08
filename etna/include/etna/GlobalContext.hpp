@@ -6,6 +6,7 @@
 #include <etna/DescriptorSetLayout.hpp>
 #include <etna/ShaderProgram.hpp>
 #include <etna/PipelineManager.hpp>
+#include <etna/CopyHelper.hpp>
 #include <etna/DescriptorSet.hpp>
 #include <etna/Image.hpp>
 #include <etna/Buffer.hpp>
@@ -31,6 +32,7 @@ namespace etna
     vk::Device getDevice() const { return vkDevice.get(); }
     vk::PhysicalDevice getPhysicalDevice() const { return vkPhysDevice; }
     vk::Instance getInstance() const { return vkInstance.get(); }
+    vk::CommandPool getCommandPool() const { return commandPool; }
     vk::Queue getQueue() const { return universalQueue; }
     uint32_t getQueueFamilyIdx() const { return universalQueueFamilyIdx; }
 
@@ -38,10 +40,12 @@ namespace etna
     PipelineManager &getPipelineManager() { return pipelineManager.value(); }
     DescriptorSetLayoutCache &getDescriptorSetLayouts() { return descriptorSetLayouts; }
     DynamicDescriptorPool &getDescriptorPool() { return *descriptorPool; }
+    CopyHelper &getCopyHelper() { return *copyHelper; }
+
+    ~GlobalContext();
 
     GlobalContext(const GlobalContext&) = delete;
     GlobalContext &operator=(const GlobalContext&) = delete;
-    ~GlobalContext();
 
     ResourceStates &getResourceTracker();
 
@@ -56,6 +60,8 @@ namespace etna
     vk::Queue universalQueue {};
     uint32_t universalQueueFamilyIdx {};
 
+    vk::CommandPool commandPool {};
+
     std::unique_ptr<VmaAllocator_T, void(*)(VmaAllocator)> vmaAllocator{nullptr, nullptr};
 
     DescriptorSetLayoutCache descriptorSetLayouts {}; 
@@ -64,6 +70,7 @@ namespace etna
     // Optionals for late init
     std::optional<PipelineManager> pipelineManager;
     std::optional<DynamicDescriptorPool> descriptorPool;
+    std::optional<CopyHelper> copyHelper;
 
     std::unique_ptr<ResourceStates> resourceTracking;
   };

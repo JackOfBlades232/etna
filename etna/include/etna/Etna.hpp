@@ -52,7 +52,7 @@ namespace etna
   ShaderProgramInfo get_shader_program(ShaderProgramId id);
   ShaderProgramInfo get_shader_program(const std::string &name);
 
-  
+
   DescriptorSet create_descriptor_set(DescriptorLayoutId layout, vk::CommandBuffer command_buffer, std::vector<Binding> bindings);
   Image create_image_from_bytes(Image::CreateInfo info, vk::CommandBuffer command_buffer, const void *data);
 

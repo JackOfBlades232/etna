@@ -264,6 +264,12 @@ namespace etna
 
     universalQueue = vkDevice->getQueue(universalQueueFamilyIdx, 0);
 
+    commandPool = vkDevice->createCommandPool(vk::CommandPoolCreateInfo
+      {
+        .flags            = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+        .queueFamilyIndex = universalQueueFamilyIdx // @TODO: maybe smth else?
+      }).value;
+
     {
       // VmaVulkanFunctions vulkanFunctions {};
       // vulkanFunctions.vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr;
@@ -294,8 +300,18 @@ namespace etna
 
     pipelineManager.emplace(vkDevice.get(), shaderPrograms);
     descriptorPool.emplace(vkDevice.get(), params.numFramesInFlight);
+    copyHelper.emplace(this, universalQueue); // @TODO: do separate transfer queue
 
     resourceTracking = std::make_unique<ResourceStates>();
+  }
+
+  GlobalContext::~GlobalContext()
+  {
+    copyHelper.reset();
+    descriptorPool.reset();
+    pipelineManager.reset();
+
+    vkDevice->destroyCommandPool(commandPool);
   }
   
   Image GlobalContext::createImage(Image::CreateInfo info)
@@ -312,6 +328,4 @@ namespace etna
   {
     return *resourceTracking;
   }
-
-  GlobalContext::~GlobalContext() = default;
 }

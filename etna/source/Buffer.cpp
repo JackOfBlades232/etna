@@ -1,14 +1,18 @@
 #include <etna/BindingItems.hpp>
 #include <etna/Buffer.hpp>
+#include <etna/CopyHelper.hpp>
+#include <etna/GlobalContext.hpp>
 #include <vulkan/vulkan_enums.hpp>
 #include "DebugUtils.hpp"
+
+#include <iostream>
 
 
 namespace etna
 {
 
 Buffer::Buffer(VmaAllocator alloc, CreateInfo info)
-  : allocator{alloc}
+  : allocator{ alloc }
 {
   vk::BufferCreateInfo buf_info{
     .size = info.size,
@@ -101,6 +105,46 @@ void Buffer::unmap()
   ETNA_ASSERT(mapped != nullptr);
   vmaUnmapMemory(allocator, allocation);
   mapped = nullptr;
+}
+
+void Buffer::createUpdateBuffer(std::size_t size)
+{
+  auto &copyHelper = get_context().getCopyHelper();
+  // @TODO: make spec names based on this buffer's name
+  updateStagingBuffer = std::make_shared<Buffer>(copyHelper.createStagingBuffer(size, "dedicated_staging_buffer"));
+  updateStagingBuffer->map();
+}
+
+void Buffer::setUpdateBuffer(const std::shared_ptr<Buffer> &buff)
+{
+  updateStagingBuffer = buff;
+}
+
+void Buffer::fill(std::byte *src, std::size_t size)
+{
+  if (!updateStagingBuffer)
+    createUpdateBuffer(size);
+
+  memcpy(updateStagingBuffer->data(), src, size);
+  auto &copyHelper = get_context().getCopyHelper();
+  copyHelper.copyBufferToBuffer(*this, *updateStagingBuffer, {{0, 0, size}});
+}
+
+void Buffer::fillOnce(std::byte *src, std::size_t size)
+{
+  auto &copyHelper = get_context().getCopyHelper();
+  Buffer tmpStagingBuff = copyHelper.createStagingBuffer(size);
+  memcpy(tmpStagingBuff.map(), src, size);
+  copyHelper.copyBufferToBuffer(*this, tmpStagingBuff, {{0, 0, size}});
+}
+
+void Buffer::update(std::byte *src, std::size_t size)
+{
+  ETNA_ASSERT(updateStagingBuffer);
+  memcpy(updateStagingBuffer->data(), src, size);
+
+  auto &copyHelper = get_context().getCopyHelper();
+  copyHelper.copyBufferToBuffer(*this, *updateStagingBuffer, {{0, 0, size}});
 }
 
 BufferBinding Buffer::genBinding(vk::DeviceSize offset, vk::DeviceSize range) const
