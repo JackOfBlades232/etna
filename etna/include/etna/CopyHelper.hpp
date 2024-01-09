@@ -20,14 +20,15 @@ public:
 
   Buffer createStagingBuffer(std::size_t size, const char *name = nullptr);
   void copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions);
-  void updateBuffer(Buffer &dst, vk::DeviceSize dstOffset,
+  void updateBuffer(Buffer &dst, vk::DeviceSize dstOffset, 
                     const std::byte *src, std::size_t size, 
-                    Buffer *stagingBuff = nullptr);
+                    Buffer *stagingBuff = nullptr, vk::DeviceSize stagingOffset = 0);
 
   /* @TODO:
   * Impl read buffer
   * Implement load for images
   * @HUH: do we need update/read/staging for images?
+  * @HUH: do we need small buffer updates?
   */
 
 private:
@@ -39,10 +40,6 @@ private:
   vk::CommandPool cmdPool;
   vk::CommandBuffer cmdBuff;
 
-  static constexpr std::size_t SMALL_BUFF_SIZE = 65536;
-
-  // @TODO: improve, this is unclear
-  // @NOTE: cmds must be [...](cmdBuff){cmdBuff.cmd***(); xN}
   void executeCommands(const std::function<void(vk::CommandBuffer &)> &cmds);
 };
 

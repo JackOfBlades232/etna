@@ -115,19 +115,13 @@ void Buffer::createUpdateBuffer()
   auto &copyHelper = get_context().getCopyHelper();
   updateStagingBuffer = std::make_shared<Buffer>(copyHelper.createStagingBuffer(size, "dedicated_staging_buffer"));
   updateStagingBuffer->map();
-}
-
-// @TODO: messages in assertions
-void Buffer::setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset)
-{
-  ETNA_ASSERT(offset + size < buff->size);
-  updateStagingBuffer = buff;
-  updateBufferOffset  = offset;
+  updateBufferOffset = 0;
 }
 
 void Buffer::fill(const std::byte *src, std::size_t srcSize)
 {
   ETNA_ASSERT(size == srcSize);
+  auto &copyHelper = get_context().getCopyHelper();
   if (!updateStagingBuffer)
     createUpdateBuffer();
 
@@ -145,7 +139,21 @@ void Buffer::update(const std::byte *src, std::size_t srcSize)
 {
   ETNA_ASSERT(updateStagingBuffer && size == srcSize);
   auto &copyHelper = get_context().getCopyHelper();
-  copyHelper.updateBuffer(*this, 0, src, size, updateStagingBuffer.get());
+  copyHelper.updateBuffer(*this, 0, src, size, updateStagingBuffer.get(), updateBufferOffset);
+}
+
+void Buffer::setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset)
+{
+  ETNA_ASSERT(offset + size < buff->size);
+  updateStagingBuffer = buff;
+  updateBufferOffset  = offset;
+}
+
+void Buffer::updateFromStagingBuffer()
+{
+  ETNA_ASSERT(updateStagingBuffer);
+  auto &copyHelper = get_context().getCopyHelper();
+  copyHelper.copyBufferToBuffer(*this, *updateStagingBuffer, {{updateBufferOffset, 0, size}});
 }
 
 BufferBinding Buffer::genBinding(vk::DeviceSize offset, vk::DeviceSize range) const

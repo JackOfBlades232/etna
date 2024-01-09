@@ -33,28 +33,25 @@ Buffer CopyHelper::createStagingBuffer(std::size_t size, const char *name)
 
 void CopyHelper::copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions)
 {
-  executeCommands([&](vk::CommandBuffer &buff){ cmdBuff.copyBuffer(dst.get(), src.get(), regions); });
+  executeCommands([&](vk::CommandBuffer &buff){ cmdBuff.copyBuffer(src.get(), dst.get(), regions); });
 }
 
-// @TODO: assert messages
-void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset,
+void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset, 
                               const std::byte *src, std::size_t size, 
-                              Buffer *stagingBuff)
+                              Buffer *stagingBuff, vk::DeviceSize stagingOffset)
 {
   ETNA_ASSERT(dstOffset % 4 == 0);
   ETNA_ASSERT(size % 4 == 0);
   ETNA_ASSERT(size <= dst.size + dstOffset);
 
-  if (size <= SMALL_BUFF_SIZE)
-    executeCommands([&](vk::CommandBuffer &buff){ cmdBuff.updateBuffer(dst.get(), dstOffset, size, src); });
-  else if (stagingBuff)
+  if (stagingBuff)
   {
     ETNA_ASSERT(size <= stagingBuff->size);
     if (!stagingBuff->data())
       stagingBuff->map();
 
     memcpy(stagingBuff->data(), src, size);
-    copyBufferToBuffer(dst, *stagingBuff, {{0, dstOffset, size}});
+    copyBufferToBuffer(dst, *stagingBuff, {{stagingOffset, dstOffset, size}});
   }
   else
   {
@@ -68,7 +65,7 @@ void CopyHelper::executeCommands(const std::function<void(vk::CommandBuffer &)> 
 {
   cmdBuff.reset();
 
-  // @TODO: assert messages
+  // @TODO: improve macro to print error
   ETNA_VK_ASSERT(cmdBuff.begin(vk::CommandBufferBeginInfo{ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit }));
   cmds(cmdBuff);
   ETNA_VK_ASSERT(cmdBuff.end());

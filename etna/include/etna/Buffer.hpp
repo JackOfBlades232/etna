@@ -41,19 +41,25 @@ public:
 
   BufferBinding genBinding(vk::DeviceSize offset = 0, vk::DeviceSize range = VK_WHOLE_SIZE) const;
 
-  // @TODO: make a restriction? (buffer is cpu visible)
   std::byte* map();
   void unmap();
 
-  // @TODO: improve this comment and sort out this functionality
-  // @NOTE: in this implementation the staging buffer matches the main buffer 1 to 1
-  // except for the case when we set an existing buffer as staging, then we can only
-  // use a contiguous piece of it.
+  // Updates are performed with a staging buffer and update the whole buffer
+
+  // Creates a dedicated staging buffer of the same size as the main buffer
   void createUpdateBuffer();
-  void setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset);
+  // Creates an update buffer if needed and update with data from the CPU 
   void fill(const std::byte *src, std::size_t srcSize);
+  // Create a temporary staging buffer and update with data from the CPU
   void fillOnce(const std::byte *src, std::size_t srcSize);
+  // Update with data from the CPU using the existing dedicated staging buffer
   void update(const std::byte *src, std::size_t srcSize);
+
+  // Sets an existing buffer as the staging buffer (useful if you use one staging buffer for multiple gpu local ones)
+  // and it's contiguous region at an offset is used for udpates
+  void setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset);
+  // Update with data in the existing dedicated staging buffer
+  void updateFromStagingBuffer();
 
   ~Buffer();
   void reset();
