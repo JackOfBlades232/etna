@@ -121,8 +121,7 @@ void Buffer::createUpdateBuffer()
 void Buffer::fill(const std::byte *src, std::size_t srcSize)
 {
   ETNA_ASSERT(size == srcSize);
-  auto &copyHelper = get_context().getCopyHelper();
-  if (!updateStagingBuffer)
+  if (!updateStagingBuffer && needsUpdateStagingBuffer())
     createUpdateBuffer();
 
   update(src, size);
@@ -137,9 +136,10 @@ void Buffer::fillOnce(const std::byte *src, std::size_t srcSize)
 
 void Buffer::update(const std::byte *src, std::size_t srcSize)
 {
-  ETNA_ASSERT(updateStagingBuffer && size == srcSize);
+  ETNA_ASSERT(size == srcSize);
+  ETNA_ASSERT(updateStagingBuffer || !needsUpdateStagingBuffer());
   auto &copyHelper = get_context().getCopyHelper();
-  copyHelper.updateBuffer(*this, 0, src, size, updateStagingBuffer.get(), updateBufferOffset);
+  copyHelper.updateBuffer(*this, 0, src, size, updateStagingBuffer ? updateStagingBuffer.get() : nullptr, updateBufferOffset);
 }
 
 void Buffer::setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset)
@@ -159,6 +159,11 @@ void Buffer::updateFromStagingBuffer()
 BufferBinding Buffer::genBinding(vk::DeviceSize offset, vk::DeviceSize range) const
 {
   return BufferBinding{*this, vk::DescriptorBufferInfo {get(), offset, range}};
+}
+
+bool Buffer::needsUpdateStagingBuffer()
+{
+  return CopyHelper::bufferNeedsStagingToUpdate(*this);
 }
 
 }

@@ -76,6 +76,8 @@ private:
 
   std::shared_ptr<Buffer> updateStagingBuffer{};
   std::size_t updateBufferOffset{};
+
+  bool needsUpdateStagingBuffer();
 };
 
 }

@@ -33,7 +33,7 @@ Buffer CopyHelper::createStagingBuffer(std::size_t size, const char *name)
 
 void CopyHelper::copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions)
 {
-  executeCommands([&](vk::CommandBuffer &buff){ cmdBuff.copyBuffer(src.get(), dst.get(), regions); });
+  executeCommands([&](vk::CommandBuffer &cbuff){ cbuff.copyBuffer(src.get(), dst.get(), regions); });
 }
 
 void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset, 
@@ -53,6 +53,8 @@ void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset,
     memcpy(stagingBuff->data(), src, size);
     copyBufferToBuffer(dst, *stagingBuff, {{stagingOffset, dstOffset, size}});
   }
+  else if (size <= UPDATE_BUFFER_CMD_SIZE_LIMIT)
+    executeCommands([&](vk::CommandBuffer &cbuff) { cbuff.updateBuffer(dst.get(), dstOffset, size, src); });
   else
   {
     Buffer tmpStagingBuff = createStagingBuffer(size, "tmp_staging_buffer");
