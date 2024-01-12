@@ -1,6 +1,5 @@
 #include <etna/BindingItems.hpp>
 #include <etna/Buffer.hpp>
-#include <etna/CopyHelper.hpp>
 #include <etna/GlobalContext.hpp>
 #include <vulkan/vulkan_enums.hpp>
 #include "DebugUtils.hpp"
@@ -50,8 +49,8 @@ void Buffer::swap(Buffer& other)
   std::swap(buffer, other.buffer);
   std::swap(mapped, other.mapped);
   std::swap(size, other.size);
-  std::swap(updateStagingBuffer, other.updateStagingBuffer);
-  std::swap(updateBufferOffset, other.updateBufferOffset);
+  std::swap(stagingBuffer, other.stagingBuffer);
+  std::swap(stagingBufferOffset, other.stagingBufferOffset);
 }
 
 Buffer::Buffer(Buffer&& other) noexcept
@@ -110,50 +109,57 @@ void Buffer::unmap()
   mapped = nullptr;
 }
 
-void Buffer::createUpdateBuffer()
+void Buffer::createStagingBuffer(StagingBufferType type)
 {
   auto &copyHelper = get_context().getCopyHelper();
-  updateStagingBuffer = std::make_shared<Buffer>(copyHelper.createStagingBuffer(size, "dedicated_staging_buffer"));
-  updateStagingBuffer->map();
-  updateBufferOffset = 0;
+  stagingBuffer = std::make_shared<Buffer>(copyHelper.createStagingBuffer(size, type, "dedicated_staging_buffer"));
+  stagingBuffer->map();
+  stagingBufferOffset = 0;
+  stagingBufferType = type;
 }
 
-void Buffer::fill(const std::byte *src, std::size_t srcSize)
+void Buffer::update(const std::byte *src, std::size_t srcSize)
 {
   ETNA_ASSERT(size == srcSize);
-  if (!updateStagingBuffer && needsUpdateStagingBuffer())
-    createUpdateBuffer();
-
-  update(src, size);
+  ETNA_ASSERT(stagingBufferIsCpuToGpu());
+  auto &copyHelper = get_context().getCopyHelper();
+  copyHelper.updateBuffer(*this, 0, src, size, stagingBuffer ? stagingBuffer.get() : nullptr, stagingBufferOffset);
 }
 
-void Buffer::fillOnce(const std::byte *src, std::size_t srcSize)
+void Buffer::updateOnce(const std::byte *src, std::size_t srcSize)
 {
   ETNA_ASSERT(size == srcSize);
   auto &copyHelper = get_context().getCopyHelper();
   copyHelper.updateBuffer(*this, 0, src, size);
 }
 
-void Buffer::update(const std::byte *src, std::size_t srcSize)
+void Buffer::read(std::byte *dst, std::size_t dstSize)
 {
-  ETNA_ASSERT(size == srcSize);
-  ETNA_ASSERT(updateStagingBuffer || !needsUpdateStagingBuffer());
+  ETNA_ASSERT(size == dstSize);
+  ETNA_ASSERT(stagingBufferIsGpuToCpu());
   auto &copyHelper = get_context().getCopyHelper();
-  copyHelper.updateBuffer(*this, 0, src, size, updateStagingBuffer ? updateStagingBuffer.get() : nullptr, updateBufferOffset);
+  copyHelper.readBuffer(*this, 0, dst, size, stagingBuffer.get(), stagingBufferOffset);
 }
 
-void Buffer::setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset)
+void Buffer::readOnce(std::byte *dst, std::size_t dstSize)
+{
+  ETNA_ASSERT(size == dstSize);
+  auto &copyHelper = get_context().getCopyHelper();
+  copyHelper.readBuffer(*this, 0, dst, size);
+}
+
+void Buffer::setStagingBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset)
 {
   ETNA_ASSERT(offset + size < buff->size);
-  updateStagingBuffer = buff;
-  updateBufferOffset  = offset;
+  stagingBuffer = buff;
+  stagingBufferOffset  = offset;
 }
 
 void Buffer::updateFromStagingBuffer()
 {
-  ETNA_ASSERT(updateStagingBuffer);
+  ETNA_ASSERT(stagingBuffer);
   auto &copyHelper = get_context().getCopyHelper();
-  copyHelper.copyBufferToBuffer(*this, *updateStagingBuffer, {{updateBufferOffset, 0, size}});
+  copyHelper.copyBufferToBuffer(*this, *stagingBuffer, {{stagingBufferOffset, 0, size}});
 }
 
 BufferBinding Buffer::genBinding(vk::DeviceSize offset, vk::DeviceSize range) const
@@ -161,9 +167,19 @@ BufferBinding Buffer::genBinding(vk::DeviceSize offset, vk::DeviceSize range) co
   return BufferBinding{*this, vk::DescriptorBufferInfo {get(), offset, range}};
 }
 
-bool Buffer::needsUpdateStagingBuffer()
+bool Buffer::needsStagingBuffer()
 {
   return CopyHelper::bufferNeedsStagingToUpdate(*this);
+}
+
+bool Buffer::stagingBufferIsCpuToGpu()
+{
+  return stagingBuffer && (stagingBufferType & StagingBufferType::eCpuToGpu);
+}
+
+bool Buffer::stagingBufferIsGpuToCpu()
+{
+  return stagingBuffer && (stagingBufferType & StagingBufferType::eGpuToCpu);
 }
 
 }

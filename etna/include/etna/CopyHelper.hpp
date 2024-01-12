@@ -18,19 +18,20 @@ public:
   CopyHelper(GlobalContext *ctx, vk::Queue queue);
   ~CopyHelper();
 
-  // @TODO: const where needed
-  Buffer createStagingBuffer(std::size_t size, const char *name = nullptr);
+  // @TODO: maybe not assert but return results if failed?
+  Buffer createStagingBuffer(std::size_t size, StagingBufferType type, const char *name = nullptr) const;
   void copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions);
   void updateBuffer(Buffer &dst, vk::DeviceSize dstOffset, 
                     const std::byte *src, std::size_t size, 
                     Buffer *stagingBuff = nullptr, vk::DeviceSize stagingOffset = 0);
+  void readBuffer(Buffer &src, vk::DeviceSize srcOffset, 
+                  std::byte *dst, std::size_t size, 
+                  Buffer *stagingBuff = nullptr, vk::DeviceSize stagingOffset = 0);
 
   static inline bool bufferNeedsStagingToUpdate(const Buffer &buff) { return buff.size > UPDATE_BUFFER_CMD_SIZE_LIMIT; }
 
   /* @TODO:
-  * Impl read buffer
-  * Implement load for images
-  * @HUH: do we need update/read/staging for images?
+  * Implement load & update for images
   */
 
 private:
