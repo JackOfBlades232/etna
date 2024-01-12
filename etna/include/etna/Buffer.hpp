@@ -10,9 +10,16 @@
 
 namespace etna
 {
-
 struct BufferBinding;
 class CopyHelper;
+
+enum StagingBufferType
+{
+  eNone     = 0,
+  eCpuToGpu = 1 << 0,
+  eGpuToCpu = 1 << 1,
+  eBothWays = eCpuToGpu | eGpuToCpu
+};
 
 class Buffer
 {
@@ -47,17 +54,24 @@ public:
   // Updates are performed with a staging buffer and update the whole buffer
 
   // Creates a dedicated staging buffer of the same size as the main buffer
-  void createUpdateBuffer();
-  // Creates an update buffer if needed and update with data from the CPU 
-  void fill(const std::byte *src, std::size_t srcSize);
-  // Create a temporary staging buffer and update with data from the CPU
-  void fillOnce(const std::byte *src, std::size_t srcSize);
+  void createStagingBuffer(StagingBufferType type);
+
   // Update with data from the CPU using the existing dedicated staging buffer
   void update(const std::byte *src, std::size_t srcSize);
+  // Create a temporary staging buffer and update with data from the CPU
+  void updateOnce(const std::byte *src, std::size_t srcSize);
+
+  // We also use the same update buffer for reading since there is no situation where
+  // you would be reading and writing at the same time anyway
+
+  // Read data back to CPU with exitsting staging buffer
+  void read(std::byte *dst, std::size_t dstSize);
+  // Read data back to CPU without existing staging buffer
+  void readOnce(std::byte *dst, std::size_t dstSize);
 
   // Sets an existing buffer as the staging buffer (useful if you use one staging buffer for multiple gpu local ones)
   // and it's contiguous region at an offset is used for udpates
-  void setUpdateBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset);
+  void setStagingBuffer(const std::shared_ptr<Buffer> &buff, std::size_t offset);
   // Update with data in the existing dedicated staging buffer
   void updateFromStagingBuffer();
 
@@ -74,10 +88,14 @@ private:
   std::byte* mapped{};
   std::size_t size{};
 
-  std::shared_ptr<Buffer> updateStagingBuffer{};
-  std::size_t updateBufferOffset{};
+  // @TODO: tidy up fields
+  std::shared_ptr<Buffer> stagingBuffer{};
+  std::size_t stagingBufferOffset{};
+  StagingBufferType stagingBufferType{};
 
-  bool needsUpdateStagingBuffer();
+  bool needsStagingBuffer();
+  bool stagingBufferIsCpuToGpu();
+  bool stagingBufferIsGpuToCpu();
 };
 
 }
