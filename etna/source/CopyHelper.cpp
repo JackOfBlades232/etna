@@ -7,18 +7,13 @@ namespace etna
 CopyHelper::CopyHelper(GlobalContext *ctx, vk::Queue queue)
   : context(ctx), transferQueue(queue)
 {
-  // @TODO: remake samples to cmd pool from ctx
-  device  = context->getDevice();
   cmdPool = context->getCommandPool();
-  cmdBuff = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo{
-      .commandPool        = cmdPool,
-      .commandBufferCount = 1 
-    }).value[0];
+  cmdBuff = context->createCommandBuffer();
 }
 
 CopyHelper::~CopyHelper()
 {
-  device.freeCommandBuffers(cmdPool, {cmdBuff});
+  context->freeCommandBuffer(cmdBuff);
 }
 
 Buffer CopyHelper::createStagingBuffer(std::size_t size, StagingBufferType type, const char *name) const

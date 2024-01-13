@@ -33,8 +33,6 @@ public:
 private:
   GlobalContext *context;
 
-  // @NOTE: this is not thread safe
-  vk::Device device;
   vk::Queue transferQueue;
   vk::CommandPool cmdPool;
   vk::CommandBuffer cmdBuff;

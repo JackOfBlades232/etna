@@ -313,6 +313,22 @@ namespace etna
 
     vkDevice->destroyCommandPool(commandPool);
   }
+
+  std::vector<vk::CommandBuffer> GlobalContext::createCommandBuffers(uint32_t cnt, vk::CommandBufferLevel level)
+  {
+    ETNA_ASSERT(cnt > 0);
+    return vkDevice.get().allocateCommandBuffers(vk::CommandBufferAllocateInfo{
+        .commandPool        = commandPool,
+        .level              = level,
+        .commandBufferCount = cnt
+      }).value;
+  }
+
+  void GlobalContext::freeCommandBuffers(std::vector<vk::CommandBuffer> buffers)
+  {
+    ETNA_ASSERT(buffers.size() > 0);
+    vkDevice.get().freeCommandBuffers(commandPool, buffers);
+  }
   
   Image GlobalContext::createImage(Image::CreateInfo info)
   {

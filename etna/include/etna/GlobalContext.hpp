@@ -26,6 +26,12 @@ namespace etna
     GlobalContext(const struct InitParams &params);
 
   public:
+    std::vector<vk::CommandBuffer> createCommandBuffers(uint32_t cnt, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary);
+    vk::CommandBuffer createCommandBuffer(vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary) { return createCommandBuffers(1, level)[0]; }
+    void freeCommandBuffers(std::vector<vk::CommandBuffer> buffers);
+    void freeCommandBuffer(vk::CommandBuffer buffer) { ETNA_ASSERT(buffer); freeCommandBuffers({buffer});
+    }
+
     Image createImage(Image::CreateInfo info);
     Buffer createBuffer(Buffer::CreateInfo info);
 
