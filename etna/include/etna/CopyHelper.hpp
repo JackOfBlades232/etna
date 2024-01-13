@@ -30,10 +30,6 @@ public:
 
   static inline bool bufferNeedsStagingToUpdate(const Buffer &buff) { return buff.size > UPDATE_BUFFER_CMD_SIZE_LIMIT; }
 
-  /* @TODO:
-  * Implement load & update for images
-  */
-
 private:
   GlobalContext *context;
 

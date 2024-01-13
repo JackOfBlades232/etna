@@ -66,16 +66,10 @@ namespace etna
   {
     const auto block_size = vk::blockSize(info.format);
     const auto image_size = block_size * info.extent.width * info.extent.height * info.extent.depth;
-    // @TODO: move to copy helper
-    etna::Buffer staging_buf = g_context->createBuffer(etna::Buffer::CreateInfo
-    {
-      .size = image_size, 
-      .bufferUsage = vk::BufferUsageFlagBits::eTransferSrc,
-      .memoryUsage = VMA_MEMORY_USAGE_CPU_ONLY,
-      .name = "tmp_staging_buf"
-    });
 
-    auto *mapped_mem = staging_buf.map();
+    auto &copyHelper         = get_context().getCopyHelper();
+    etna::Buffer staging_buf = copyHelper.createStagingBuffer(image_size, eCpuToGpu, "tmp_image_staging_buffer");
+    auto *mapped_mem         = staging_buf.map();
     memcpy(mapped_mem, data, image_size);
     staging_buf.unmap();
 
