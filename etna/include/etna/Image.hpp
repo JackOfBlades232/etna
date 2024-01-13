@@ -8,7 +8,6 @@
 
 namespace etna
 {
-
 struct ImageBinding;
 
 class Image
@@ -56,6 +55,8 @@ public:
   vk::ImageAspectFlags getAspectMaskByFormat() const;
 
 private:
+  friend class CopyHelper;
+
   struct ViewParamsHasher
   {
     size_t operator()(ViewParams params) const
@@ -78,7 +79,9 @@ private:
 
   VmaAllocation allocation{};
   vk::Image image{};
-  vk::Format format;
+  vk::Format format{};
+  uint32_t layerCount{};
+  vk::Extent3D extent{};
 };
 
 }

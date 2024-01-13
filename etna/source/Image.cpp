@@ -7,7 +7,7 @@ namespace etna
 
 Image::Image(VmaAllocator alloc, CreateInfo info)
   : allocator{alloc},
-  format{info.format}
+    format{ info.format }, layerCount{ static_cast<uint32_t>(info.layers) }, extent{ info.extent }
 {
   vk::ImageCreateInfo image_info{
     .imageType = vk::ImageType::e2D,
@@ -136,5 +136,6 @@ ImageBinding Image::genBinding(vk::Sampler sampler, vk::ImageLayout layout, View
 {
   return ImageBinding{*this, vk::DescriptorImageInfo {sampler, getView(params), layout}};
 }
+
 
 }

@@ -1,5 +1,6 @@
 #include "etna/CopyHelper.hpp"
 #include "etna/GlobalContext.hpp"
+#include "etna/Etna.hpp"
 
 namespace etna
 {
@@ -40,6 +41,41 @@ Buffer CopyHelper::createStagingBuffer(std::size_t size, StagingBufferType type,
 void CopyHelper::copyBufferToBuffer(Buffer &dst, Buffer &src, const std::vector<vk::BufferCopy> &regions)
 {
   executeCommands([&](vk::CommandBuffer &cbuff){ cbuff.copyBuffer(src.get(), dst.get(), regions); });
+}
+
+void CopyHelper::copyBufferToImage(Image &dst, Buffer &src, const std::vector<vk::BufferImageCopy> &regions)
+{
+  executeCommands([&](vk::CommandBuffer &cbuff)
+    {
+      set_state(cbuff, dst.get(), vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite, 
+                vk::ImageLayout::eTransferDstOptimal, dst.getAspectMaskByFormat());
+      flush_barriers(cbuff);
+      cbuff.copyBufferToImage(src.get(), dst.get(), vk::ImageLayout::eTransferDstOptimal, regions.size(), regions.data());
+    });
+}
+
+void CopyHelper::copyImageToBuffer(Buffer &dst, Image &src, const std::vector<vk::BufferImageCopy> &regions)
+{
+  executeCommands([&](vk::CommandBuffer &cbuff)
+    {
+      set_state(cbuff, src.get(), vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead, 
+                vk::ImageLayout::eTransferSrcOptimal, src.getAspectMaskByFormat());
+      flush_barriers(cbuff);
+      cbuff.copyImageToBuffer(src.get(), vk::ImageLayout::eTransferSrcOptimal, dst.get(), regions.size(), regions.data());
+    });
+}
+
+void CopyHelper::copyImageToImage(Image &dst, Image &src, const std::vector<vk::ImageCopy> &regions)
+{
+  executeCommands([&](vk::CommandBuffer &cbuff)
+    {
+      set_state(cbuff, src.get(), vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead, 
+                vk::ImageLayout::eTransferSrcOptimal, src.getAspectMaskByFormat());
+      set_state(cbuff, dst.get(), vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite, 
+                vk::ImageLayout::eTransferDstOptimal, dst.getAspectMaskByFormat());
+      flush_barriers(cbuff);
+      cbuff.copyImage(src.get(), vk::ImageLayout::eTransferSrcOptimal, dst.get(), vk::ImageLayout::eTransferDstOptimal, regions);
+    });
 }
 
 void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset, 
@@ -98,6 +134,56 @@ void CopyHelper::readBuffer(Buffer &src, vk::DeviceSize srcOffset,
   }
 }
 
+void CopyHelper::updateImage(Image &dst, const std::byte *src, std::size_t size,
+                             Buffer *stagingBuff, vk::DeviceSize stagingOffset)
+{
+  // @TODO: is this needed?
+  ETNA_ASSERT(stagingOffset % 4 == 0);
+  ETNA_ASSERT(size % 4 == 0);
+  // @TODO: add image size and assert
+
+  if (stagingBuff)
+  {
+    ETNA_ASSERT(size <= stagingBuff->size - stagingOffset);
+    if (!stagingBuff->data())
+      stagingBuff->map();
+
+    memcpy(stagingBuff->data() + (std::size_t)stagingOffset, src, size);
+    copyBufferToImage(dst, *stagingBuff, {defaultBufferImageCopy(dst, stagingOffset)});
+  }
+  else
+  {
+    Buffer tmpStagingBuff = createStagingBuffer(size, eCpuToGpu, "tmp_staging_buffer");
+    memcpy(tmpStagingBuff.map(), src, size);
+    copyBufferToImage(dst, tmpStagingBuff, {defaultBufferImageCopy(dst)});
+  }
+}
+
+void CopyHelper::readImage(Image &src, std::byte *dst, std::size_t size,
+                           Buffer *stagingBuff, vk::DeviceSize stagingOffset)
+{
+  // @TODO: is this needed?
+  ETNA_ASSERT(stagingOffset % 4 == 0);
+  ETNA_ASSERT(size % 4 == 0);
+  // @TODO: add image size and assert
+
+  if (stagingBuff)
+  {
+    ETNA_ASSERT(size <= stagingBuff->size - stagingOffset);
+    if (!stagingBuff->data())
+      stagingBuff->map();
+
+    copyImageToBuffer(*stagingBuff, src, {defaultBufferImageCopy(src, stagingOffset)});
+    memcpy(dst, stagingBuff->data() + (std::size_t)stagingOffset, size);
+  }
+  else
+  {
+    Buffer tmpStagingBuff = createStagingBuffer(size, eGpuToCpu, "tmp_staging_buffer");
+    copyImageToBuffer(tmpStagingBuff, src, {defaultBufferImageCopy(src)});
+    memcpy(dst, tmpStagingBuff.map(), size);
+  }
+}
+
 void CopyHelper::executeCommands(const std::function<void(vk::CommandBuffer &)> &cmds)
 {
   cmdBuff.reset();
@@ -113,6 +199,20 @@ void CopyHelper::executeCommands(const std::function<void(vk::CommandBuffer &)> 
       }
     }));
   ETNA_VK_ASSERT(transferQueue.waitIdle());
+}
+
+vk::BufferImageCopy CopyHelper::defaultBufferImageCopy(const Image &img, vk::DeviceSize stagingOffset)
+{
+  // @TODO: do I need row len/im h?
+  return vk::BufferImageCopy{
+    .bufferOffset     = stagingOffset,
+    .imageSubresource = 
+      {
+        .aspectMask = img.getAspectMaskByFormat(),
+        .layerCount = img.layerCount 
+      },
+    .imageExtent = img.extent
+  };
 }
 
 }
