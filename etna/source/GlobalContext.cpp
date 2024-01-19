@@ -267,7 +267,7 @@ namespace etna
     commandPool = vkDevice->createCommandPool(vk::CommandPoolCreateInfo
       {
         .flags            = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
-        .queueFamilyIndex = universalQueueFamilyIdx // @TODO: maybe smth else?
+        .queueFamilyIndex = universalQueueFamilyIdx
       }).value;
 
     {
@@ -300,7 +300,7 @@ namespace etna
 
     pipelineManager.emplace(vkDevice.get(), shaderPrograms);
     descriptorPool.emplace(vkDevice.get(), params.numFramesInFlight);
-    copyHelper.emplace(this, universalQueue); // @TODO: do separate transfer queue
+    copyHelper.emplace(this, universalQueue); // @TODO: do separate transfer queue?
 
     resourceTracking = std::make_unique<ResourceStates>();
   }
@@ -317,11 +317,11 @@ namespace etna
   std::vector<vk::CommandBuffer> GlobalContext::createCommandBuffers(uint32_t cnt, vk::CommandBufferLevel level)
   {
     ETNA_ASSERT(cnt > 0);
-    return vkDevice.get().allocateCommandBuffers(vk::CommandBufferAllocateInfo{
+    return validate_vk_result(vkDevice.get().allocateCommandBuffers(vk::CommandBufferAllocateInfo{
         .commandPool        = commandPool,
         .level              = level,
         .commandBufferCount = cnt
-      }).value;
+      }));
   }
 
   void GlobalContext::freeCommandBuffers(std::vector<vk::CommandBuffer> buffers)

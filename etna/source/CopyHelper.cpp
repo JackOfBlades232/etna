@@ -41,7 +41,6 @@ void CopyHelper::updateBuffer(Buffer &dst, vk::DeviceSize dstOffset,
                               const std::byte *src, std::size_t size, 
                               Buffer *stagingBuff, vk::DeviceSize stagingOffset)
 {
-  // @TODO: is this needed?
   ETNA_ASSERT(dstOffset % 4 == 0);
   ETNA_ASSERT(stagingOffset % 4 == 0);
   ETNA_ASSERT(size % 4 == 0);

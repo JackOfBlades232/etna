@@ -60,7 +60,7 @@ namespace etna
 {
 
 template <typename T>
-inline T &validate_vk_result(vk::ResultValue<T> res)
+inline T validate_vk_result(vk::ResultValue<T> res)
 {
   ETNA_VK_ASSERT(res.result);
   return res.value;
