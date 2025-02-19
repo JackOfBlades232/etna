@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.25)
 
 find_package(Vulkan 1.3.275 REQUIRED)
 
+if(${Vulkan_VERSION} VERSION_GREATER_EQUAL 1.4.0)
+    message(
+      FATAL_ERROR
+        "Vulkan major versions higher than 1.3.xxx are not suppoted. Install latest vulkan sdk 1.3.296."
+      )
+endif()
+
 # GPU-side allocator for Vulkan by AMD
 CPMAddPackage(
   NAME VulkanMemoryAllocator
