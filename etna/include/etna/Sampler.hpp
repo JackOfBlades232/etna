@@ -4,6 +4,8 @@
 
 #include <etna/Etna.hpp>
 
+#include <optional>
+
 
 namespace etna
 {
@@ -16,6 +18,7 @@ public:
   struct CreateInfo
   {
     vk::Filter filter = vk::Filter::eNearest;
+    vk::SamplerMipmapMode mipMapMode = vk::SamplerMipmapMode::eLinear;
     vk::SamplerAddressMode addressMode = vk::SamplerAddressMode::eClampToEdge;
     std::string_view name;
     float minLod = 0.0f;
