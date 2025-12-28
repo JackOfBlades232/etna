@@ -12,14 +12,16 @@ namespace etna
 
 BlockingTransferHelper::BlockingTransferHelper(CreateInfo info)
   : stagingSize{info.stagingSize}
-  , stagingBuffer{etna::get_context().createBuffer(Buffer::CreateInfo{
-      .size = stagingSize,
-      .bufferUsage = vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
-      .memoryUsage = VMA_MEMORY_USAGE_AUTO,
-      .allocationCreate =
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-      .name = "BlockingTransferHelper::stagingBuffer",
-    })}
+  , stagingBuffer{etna::get_context().createBuffer(
+      Buffer::CreateInfo{
+        .size = stagingSize,
+        .bufferUsage =
+          vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eTransferSrc,
+        .memoryUsage = VMA_MEMORY_USAGE_AUTO,
+        .allocationCreate =
+          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .name = "BlockingTransferHelper::stagingBuffer",
+      })}
 {
   stagingBuffer.map();
 }
@@ -109,7 +111,7 @@ void BlockingTransferHelper::uploadImage(
 
   const std::size_t bytesPerPixel = vk::blockSize(dst.getFormat());
 
-  ETNA_ASSERTF(d == 1, "3D image uploads are not implemented yet!");
+  ETNA_ASSERTF(d == 1, "3D image blocking uploads are not implemented yet!");
 
   ETNA_ASSERTF(
     w * h * bytesPerPixel == src.size(),
