@@ -82,7 +82,8 @@ DescriptorSet create_descriptor_set(
 PersistentDescriptorSet create_persistent_descriptor_set(
   DescriptorLayoutId layout, std::vector<Binding> bindings, bool allow_unbound_slots)
 {
-  auto set = gContext->getPersistentDescriptorPool().allocateSet(layout, bindings);
+  auto set =
+    gContext->getPersistentDescriptorPool().allocateSet(layout, bindings, allow_unbound_slots);
   write_set(set, allow_unbound_slots);
   return set;
 }

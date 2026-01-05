@@ -90,10 +90,14 @@ struct PersistentDescriptorSet
 {
   PersistentDescriptorSet() = default;
   PersistentDescriptorSet(
-    DescriptorLayoutId id, vk::DescriptorSet vk_set, std::vector<Binding> resources)
+    DescriptorLayoutId id,
+    vk::DescriptorSet vk_set,
+    std::vector<Binding> resources,
+    bool allow_unbound_slots)
     : layoutId{id}
     , set{vk_set}
     , bindings{std::move(resources)}
+    , allowUnboundSlots{allow_unbound_slots}
   {
   }
 
@@ -107,10 +111,14 @@ struct PersistentDescriptorSet
 
   void processBarriers(vk::CommandBuffer cmd_buffer) const;
 
+  // @NOTE: has to be called BEFORE binding the dset
+  void updateBindings(std::span<Binding const> new_bindings);
+
 private:
   DescriptorLayoutId layoutId{};
   vk::DescriptorSet set{};
   std::vector<Binding> bindings{};
+  bool allowUnboundSlots = false;
 };
 
 /**
@@ -155,7 +163,8 @@ struct PersistentDescriptorPool
 {
   explicit PersistentDescriptorPool(vk::Device dev);
 
-  PersistentDescriptorSet allocateSet(DescriptorLayoutId layout_id, std::vector<Binding> bindings);
+  PersistentDescriptorSet allocateSet(
+    DescriptorLayoutId layout_id, std::vector<Binding> bindings, bool allow_unbound_slots = false);
 
 private:
   vk::Device vkDevice;
