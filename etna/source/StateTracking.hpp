@@ -60,11 +60,15 @@ public:
   void setColorTarget(
     vk::CommandBuffer com_buffer,
     vk::Image image,
+    bool read,
+    bool write,
     BarrierBehavior behavior = BarrierBehavior::eDefault);
   void setDepthStencilTarget(
     vk::CommandBuffer com_buffer,
     vk::Image image,
     vk::ImageAspectFlags aspect_flags,
+    bool read,
+    bool write,
     BarrierBehavior behavior = BarrierBehavior::eDefault);
   void setResolveTarget(
     vk::CommandBuffer com_buffer,

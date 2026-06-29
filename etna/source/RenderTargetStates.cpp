@@ -43,7 +43,11 @@ RenderTargetState::RenderTargetState(
     attachmentInfos[i].clearValue = color_attachments[i].clearColorValue;
 
     etna::get_context().getResourceTracker().setColorTarget(
-      commandBuffer, color_attachments[i].image, behavior);
+      commandBuffer,
+      color_attachments[i].image,
+      color_attachments[i].loadOp == vk::AttachmentLoadOp::eLoad,
+      color_attachments[i].storeOp == vk::AttachmentStoreOp::eStore,
+      behavior);
 
     if (color_attachments[i].resolveImage)
     {
@@ -90,6 +94,8 @@ RenderTargetState::RenderTargetState(
       commandBuffer,
       depth_attachment.image,
       vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil,
+      depth_attachment.loadOp == vk::AttachmentLoadOp::eLoad,
+      depth_attachment.storeOp == vk::AttachmentStoreOp::eStore,
       behavior);
 
     if (depth_attachment.resolveImage && stencil_attachment.resolveImage)
@@ -109,6 +115,8 @@ RenderTargetState::RenderTargetState(
         commandBuffer,
         depth_attachment.image,
         depth_attachment.imageAspect.value_or(vk::ImageAspectFlagBits::eDepth),
+        depth_attachment.loadOp == vk::AttachmentLoadOp::eLoad,
+        depth_attachment.storeOp == vk::AttachmentStoreOp::eStore,
         behavior);
 
       if (depth_attachment.resolveImage)
@@ -127,6 +135,8 @@ RenderTargetState::RenderTargetState(
         commandBuffer,
         stencil_attachment.image,
         stencil_attachment.imageAspect.value_or(vk::ImageAspectFlagBits::eStencil),
+        stencil_attachment.loadOp == vk::AttachmentLoadOp::eLoad,
+        stencil_attachment.storeOp == vk::AttachmentStoreOp::eStore,
         behavior);
 
       if (stencil_attachment.resolveImage)

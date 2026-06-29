@@ -120,15 +120,20 @@ void ResourceStates::flushBarriers(vk::CommandBuffer com_buf)
 }
 
 void ResourceStates::setColorTarget(
-  vk::CommandBuffer com_buffer, vk::Image image, BarrierBehavior behavior)
+  vk::CommandBuffer com_buffer, vk::Image image, bool read, bool write, BarrierBehavior behavior)
 {
   if (get_context().shouldGenerateBarriersWhen(behavior))
   {
+    vk::AccessFlags2 accessFlags;
+    if (read)
+      accessFlags |= vk::AccessFlagBits2::eColorAttachmentRead;
+    if (write)
+      accessFlags |= vk::AccessFlagBits2::eColorAttachmentWrite;
     setTextureState(
       com_buffer,
       image,
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-      vk::AccessFlagBits2::eColorAttachmentWrite,
+      accessFlags,
       vk::ImageLayout::eColorAttachmentOptimal,
       vk::ImageAspectFlagBits::eColor);
   }
@@ -138,16 +143,23 @@ void ResourceStates::setDepthStencilTarget(
   vk::CommandBuffer com_buffer,
   vk::Image image,
   vk::ImageAspectFlags aspect_flags,
+  bool read,
+  bool write,
   BarrierBehavior behavior)
 {
   if (get_context().shouldGenerateBarriersWhen(behavior))
   {
+    vk::AccessFlags2 accessFlags;
+    if (read)
+      accessFlags |= vk::AccessFlagBits2::eDepthStencilAttachmentRead;
+    if (write)
+      accessFlags |= vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
     setTextureState(
       com_buffer,
       image,
       vk::PipelineStageFlagBits2::eEarlyFragmentTests |
         vk::PipelineStageFlagBits2::eLateFragmentTests,
-      vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+      accessFlags,
       vk::ImageLayout::eDepthStencilAttachmentOptimal,
       aspect_flags);
   }
