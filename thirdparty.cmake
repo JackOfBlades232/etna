@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 
 find_package(Vulkan 1.4.357 REQUIRED)
+find_package(Slang 2026.13.1 REQUIRED)
 
 # GPU-side allocator for Vulkan by AMD
 CPMAddPackage(

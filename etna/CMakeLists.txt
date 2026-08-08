@@ -30,6 +30,7 @@ target_include_directories(etna PRIVATE source)
 
 target_link_libraries(etna PUBLIC
   Vulkan::Vulkan
+  Slang::slang
   VulkanMemoryAllocator
   "spirv-reflect-static"
   spdlog::spdlog

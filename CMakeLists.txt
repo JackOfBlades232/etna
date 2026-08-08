@@ -21,6 +21,8 @@ endif ()
 # No profiling in release builds, mostly because Tracy emmits warnings in that case.
 option(TRACY_ENABLE "Enable profiling" ${ETNA_DEBUG})
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include("get_cpm.cmake")
 include("thirdparty.cmake")
 include("get_version.cmake")
