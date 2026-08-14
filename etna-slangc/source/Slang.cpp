@@ -1,11 +1,10 @@
 #define _CRT_SECURE_NO_WARNINGS
-#include <etna/Slang.hpp>
-
-#include <etna/Assert.hpp>
+#include "Slang.hpp"
 
 #include <spdlog/spdlog.h>
 
 #include <cstdlib>
+#include <cassert>
 #include <optional>
 #include <filesystem>
 #include <vector>
@@ -15,9 +14,6 @@
 #else
 #include <dlfcn.h>
 #endif
-
-namespace etna
-{
 
 static std::optional<std::string> get_env_var(const char* name)
 {
@@ -85,15 +81,15 @@ SlangRuntime::SlangRuntime(CreateInfo&& ci)
   (void)ci;
 
   dynlibHandle = try_load_slang_dynlib();
-  ETNA_ASSERT(dynlibHandle); // @TODO: proper handling
+  assert(dynlibHandle); // @TODO: proper handling
 
   SlangGlobalSessionDesc desc = {};
   auto gsRes = slang::createGlobalSession(&desc, globalSession.writeRef());
-  ETNA_ASSERT(SLANG_SUCCEEDED(gsRes)); // @TODO: proper handling
+  assert(SLANG_SUCCEEDED(gsRes)); // @TODO: proper handling
 
   slang::SessionDesc sessionDesc = {};
   auto sRes = globalSession->createSession(sessionDesc, session.writeRef());
-  ETNA_ASSERT(SLANG_SUCCEEDED(sRes)); // @TODO: proper handling
+  assert(SLANG_SUCCEEDED(sRes)); // @TODO: proper handling
 
   // @TEST
   spdlog::info(
@@ -112,5 +108,3 @@ SlangRuntime::~SlangRuntime()
   if (dynlibHandle)
     unload_dynlib(dynlibHandle);
 }
-
-} // namespace etna

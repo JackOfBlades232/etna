@@ -420,12 +420,6 @@ GlobalContext::GlobalContext(const InitParams& params)
     tracyCtx.reset(ctx);
   }
 #endif
-
-  if (params.loadSlangRuntime)
-  {
-    slangRuntime = std::make_unique<SlangRuntime>(SlangRuntime::CreateInfo{});
-    // @TODO: failure path
-  }
 }
 
 Image GlobalContext::createImage(const Image::CreateInfo& info)
@@ -496,17 +490,6 @@ PersistentDescriptorPool& GlobalContext::getPersistentDescriptorPool()
 ResourceStates& GlobalContext::getResourceTracker()
 {
   return *resourceTracking;
-}
-
-SlangRuntime& GlobalContext::getSlang()
-{
-  ETNA_ASSERT(hasSlang());
-  return *slangRuntime;
-}
-
-SlangRuntime* GlobalContext::getSlangOpt()
-{
-  return slangRuntime.get();
 }
 
 GlobalContext::~GlobalContext() = default;

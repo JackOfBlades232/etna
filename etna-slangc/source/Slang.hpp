@@ -7,9 +7,6 @@
 
 // @TODO: conditional inclusion of the whole slang thing in the binary
 
-namespace etna
-{
-
 class SlangRuntime
 {
   Slang::ComPtr<slang::IGlobalSession> globalSession{};
@@ -26,7 +23,5 @@ public:
 
   ~SlangRuntime();
 };
-
-} // namespace etna
 
 #endif

@@ -10,7 +10,6 @@
 #include <etna/Buffer.hpp>
 #include <etna/Window.hpp>
 #include <etna/BarrierBehavior.hpp>
-#include <etna/Slang.hpp>
 
 #include <vk_mem_alloc.h>
 
@@ -56,10 +55,6 @@ public:
   GpuWorkCount& getMainWorkCount() { return mainWorkStream; }
   const GpuWorkCount& getMainWorkCount() const { return mainWorkStream; }
 
-  SlangRuntime& getSlang();
-  SlangRuntime* getSlangOpt();
-  bool hasSlang() const { return slangRuntime != nullptr; }
-
   // Do not use this directly, use Profiling.hpp
   void* getTracyContext() { return tracyCtx.get(); }
 
@@ -91,7 +86,6 @@ private:
   std::unique_ptr<PersistentDescriptorPool> persistentDescriptorPool;
   std::unique_ptr<ResourceStates> resourceTracking;
   std::unique_ptr<void, void (*)(void*)> tracyCtx;
-  std::unique_ptr<SlangRuntime> slangRuntime;
 
   bool shouldGenerateBarriersFlag;
 
