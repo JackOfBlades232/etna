@@ -5,9 +5,12 @@
 #include <slang/slang.h>
 #include <slang/slang-com-ptr.h>
 
+#include <string>
+#include <filesystem>
+
 // @TODO: conditional inclusion of the whole slang thing in the binary
 
-class SlangRuntime
+class SlangCompiler
 {
   Slang::ComPtr<slang::IGlobalSession> globalSession{};
   Slang::ComPtr<slang::ISession> session{};
@@ -16,12 +19,20 @@ class SlangRuntime
 public:
   struct CreateInfo
   {
+    std::vector<std::filesystem::path> commonIncludeDirs = {};
+    bool emitSpirvDebugInfo = false;
   };
 
-  explicit SlangRuntime(CreateInfo&& ci);
+  explicit SlangCompiler(const CreateInfo& ci);
   // @TODO: semantics
 
-  ~SlangRuntime();
+  ~SlangCompiler();
+
+  int compile(
+    const std::filesystem::path& source,
+    std::string_view target,
+    const std::filesystem::path& dest,
+    const std::filesystem::path& dest_depfile = {});
 };
 
 #endif
