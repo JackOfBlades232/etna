@@ -241,10 +241,27 @@ int SlangCompiler::compile(
 
   if (!dest_depfile.empty())
   {
-    // @TODO: compile a .d file
+    if (FILE* df = fopen(to_char_str(dest_depfile.string()).c_str(), "w+"))
+    {
+      fprintf(df, "%s:", to_char_str(dest.string()).c_str());
+      for (SlangInt32 i = 0; i < slangModule->getDependencyFileCount(); ++i)
+      {
+        const char* path = slangModule->getDependencyFilePath(i);
+        fprintf(df, " %s", path);
+      }
+      fclose(df);
+    }
+    else
+    {
+      spdlog::info("Can't open depfile {}", dest_depfile.string());
+    }
   }
 
   spdlog::info(
-    "Compiled module from {} with entrypoint {} to {}!", source.string(), target, dest.string());
+    "Compiled module from {} with entrypoint {} to {} with depfile {}!",
+    source.string(),
+    target,
+    dest.string(),
+    dest_depfile.string());
   return 0;
 }

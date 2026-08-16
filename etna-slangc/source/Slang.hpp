@@ -4,6 +4,7 @@
 
 #include <slang/slang.h>
 #include <slang/slang-com-ptr.h>
+#include <slang/slang-com-helper.h>
 
 #include <string>
 #include <filesystem>

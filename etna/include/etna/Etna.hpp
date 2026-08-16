@@ -43,9 +43,6 @@ struct InitParams
 
   /// Whether things like createDescriptorSet or renderTarget should auto-create barriers
   bool generateBarriersAutomatically = true;
-
-  /// Whether we are going to work with slang shaders at runtime
-  bool loadSlangRuntime = false; // @TODO: set to true by default?
 };
 
 bool is_initilized();
