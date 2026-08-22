@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.25)
 
 add_executable(etna-slangc
   "source/main.cpp"
-  "source/Slang.cpp")
+  "source/Slang.cpp"
+  "source/Commandline.cpp")
 
 target_include_directories(etna-slangc PRIVATE source)
 

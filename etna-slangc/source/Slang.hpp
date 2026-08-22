@@ -1,6 +1,6 @@
 #pragma once
-#ifndef ETNA_SLANG_RUNTIME_HPP_INCLUDED
-#define ETNA_SLANG_RUNTIME_HPP_INCLUDED
+#ifndef ETNA_SLANG_HPP_INCLUDED
+#define ETNA_SLANG_HPP_INCLUDED
 
 #include <slang/slang.h>
 #include <slang/slang-com-ptr.h>
@@ -25,13 +25,12 @@ public:
   };
 
   explicit SlangCompiler(const CreateInfo& ci);
-  // @TODO: semantics
 
   ~SlangCompiler();
 
   int compile(
     const std::filesystem::path& source,
-    std::string_view target,
+    std::string_view entry_point,
     const std::filesystem::path& dest,
     const std::filesystem::path& dest_depfile = {});
 };

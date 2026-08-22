@@ -153,7 +153,7 @@ static void diagnose_if_needed(const Slang::ComPtr<slang::IBlob>& blob, bool op_
 
 int SlangCompiler::compile(
   const std::filesystem::path& source,
-  std::string_view target,
+  std::string_view entry_point,
   const std::filesystem::path& dest,
   const std::filesystem::path& dest_depfile)
 {
@@ -171,10 +171,10 @@ int SlangCompiler::compile(
   Slang::ComPtr<slang::IEntryPoint> entryPoint;
   {
     Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    slangModule->findEntryPointByName(target.data(), entryPoint.writeRef());
+    slangModule->findEntryPointByName(entry_point.data(), entryPoint.writeRef());
     if (!entryPoint)
     {
-      spdlog::info("Can't get entrypoint {} from {}", target, source.string());
+      spdlog::info("Can't get entrypoint {} from {}", entry_point, source.string());
       return -2;
     }
   }
@@ -192,7 +192,8 @@ int SlangCompiler::compile(
     diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
     if (!SLANG_SUCCEEDED(result))
     {
-      spdlog::info("Can't compose program with entrypoint {} from {}", target, source.string());
+      spdlog::info(
+        "Can't compose program with entrypoint {} from {}", entry_point, source.string());
       return -3;
     }
   }
@@ -205,7 +206,7 @@ int SlangCompiler::compile(
     diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
     if (!SLANG_SUCCEEDED(result))
     {
-      spdlog::info("Can't link program with entrypoint {} from {}", target, source.string());
+      spdlog::info("Can't link program with entrypoint {} from {}", entry_point, source.string());
       return -3;
     }
   }
@@ -222,7 +223,9 @@ int SlangCompiler::compile(
     if (!SLANG_SUCCEEDED(result))
     {
       spdlog::info(
-        "Can't generate spirv for program with entrypoint {} from {}", target, source.string());
+        "Can't generate spirv for program with entrypoint {} from {}",
+        entry_point,
+        source.string());
       return -3;
     }
   }
@@ -260,7 +263,7 @@ int SlangCompiler::compile(
   spdlog::info(
     "Compiled module from {} with entrypoint {} to {} with depfile {}!",
     source.string(),
-    target,
+    entry_point,
     dest.string(),
     dest_depfile.string());
   return 0;
