@@ -172,6 +172,8 @@ ShaderProgramId ShaderProgramManager::loadProgram(
   if (programNames.find(name) != programNames.end())
     ETNA_PANIC("Shader program {} redefenition", name);
 
+  // @TODO: split paths for slang and raw spirv here
+
   std::vector<uint32_t> moduleIds;
   std::vector<vk::ShaderStageFlagBits> stages;
   for (const auto& path : shaders_path)

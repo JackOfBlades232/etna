@@ -144,6 +144,8 @@ private:
     vk::PushConstantRange pushConst{};
     vk::UniquePipelineLayout progLayout;
 
+    // @TODO: optional slang-based info here
+
     void reload(ShaderProgramManager& manager);
   };
 
