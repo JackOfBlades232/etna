@@ -1,5 +1,9 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "Slang.hpp"
+#include "SlangShaderSerialization.hpp"
+#include "Common.hpp"
+
+#include <etna/SlangShaderFormat.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -16,17 +20,9 @@
 #include <dlfcn.h>
 #endif
 
-// @TODO: proper error handling
+using namespace etna;
 
-template <class TS>
-  requires(std::same_as<TS, std::string> || std::same_as<TS, std::wstring>)
-std::string to_char_str(const TS& s)
-{
-  if constexpr (std::same_as<TS, std::string>)
-    return s;
-  else
-    return std::to_string(s);
-}
+// @TODO: proper error handling
 
 static std::optional<std::string> get_env_var(const char* name)
 {
@@ -109,26 +105,18 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
     {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}}};
   for (const auto& incDir : ci.commonIncludeDirs)
   {
-    options.push_back(
-      slang::CompilerOptionEntry{
-        slang::CompilerOptionName::Include,
-        slang::CompilerOptionValue{
-          .kind = slang::CompilerOptionValueKind::String,
-          .stringValue0 = to_char_str(incDir.string()).c_str()}});
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::Include,
+      slang::CompilerOptionValue{
+        .kind = slang::CompilerOptionValueKind::String,
+        .stringValue0 = to_char_str(incDir.string()).c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
-  sessionDesc.compilerOptionEntryCount = options.size();
+  sessionDesc.compilerOptionEntryCount = uint32_t(options.size());
 
   auto sRes = globalSession->createSession(sessionDesc, session.writeRef());
   assert(SLANG_SUCCEEDED(sRes)); // @TODO: proper handling
-
-  // @TEST
-  spdlog::info(
-    "SLANG: dynlib={}, globalSession={}, session={}",
-    dynlibHandle,
-    (void*)globalSession.get(),
-    (void*)session.get());
 }
 
 SlangCompiler::~SlangCompiler()
@@ -151,9 +139,62 @@ static void diagnose_if_needed(const Slang::ComPtr<slang::IBlob>& blob, bool op_
     spdlog::warn("{}", (const char*)blob->getBufferPointer());
 }
 
+static const char* stage_name(SlangStage stage)
+{
+  static constexpr const char* STAGE_NAMES[SLANG_STAGE_COUNT] = {
+    "NONE",
+    "VERTEX",
+    "HULL",
+    "DOMAIN",
+    "GEOMETRY",
+    "FRAGMENT",
+    "COMPUTE",
+    "RAY_GENERATION",
+    "INTERSECTION",
+    "ANY_HIT",
+    "CLOSEST_HIT",
+    "MISS",
+    "CALLABLE",
+    "MESH",
+    "AMPLIFICATION",
+    "DISPATCH",
+    "NODE",
+  };
+  if (stage >= 0 && stage < SLANG_STAGE_COUNT)
+    return STAGE_NAMES[stage];
+  else
+    return nullptr;
+}
+
+static SlangShaderBytecodeRef* bytecode_slot(SlangShaderHeader* header, SlangStage stage)
+{
+  assert(header);
+  switch (stage)
+  {
+  case SLANG_STAGE_VERTEX:
+    return &header->vert;
+  case SLANG_STAGE_HULL:
+    return &header->tesc;
+  case SLANG_STAGE_DOMAIN:
+    return &header->tese;
+  case SLANG_STAGE_GEOMETRY:
+    return &header->geom;
+  case SLANG_STAGE_FRAGMENT:
+    return &header->frag;
+  case SLANG_STAGE_COMPUTE:
+    return &header->comp;
+  default:
+    spdlog::error(
+      "Unsupported entry point stage {}, etna-slangc only supports VERTEX, HULL, DOMAIN, GEOMETRY, "
+      "FRAGMENT and COMPUTE at this point",
+      stage_name(stage));
+    return nullptr;
+  }
+}
+
 int SlangCompiler::compile(
   const std::filesystem::path& source,
-  std::string_view entry_point,
+  std::span<const std::string> entry_points,
   const std::filesystem::path& dest,
   const std::filesystem::path& dest_depfile)
 {
@@ -168,78 +209,132 @@ int SlangCompiler::compile(
       return -1;
   }
 
-  Slang::ComPtr<slang::IEntryPoint> entryPoint;
+  SlangShaderSerializationContext sctx = {};
+  auto* header =
+    sctx.ref<SlangShaderHeader>(slang_shader_ser_write_type<SlangShaderHeader>({}, sctx));
+  header->magic = SLANG_SHADER_MAGIC;
+  header->version = SLANG_SHADER_VERSION;
+
+  for (const auto& ep : entry_points)
   {
-    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    slangModule->findEntryPointByName(entry_point.data(), entryPoint.writeRef());
-    if (!entryPoint)
+    Slang::ComPtr<slang::IEntryPoint> entryPoint;
     {
-      spdlog::info("Can't get entrypoint {} from {}", entry_point, source.string());
-      return -2;
+      Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+      slangModule->findEntryPointByName(ep.data(), entryPoint.writeRef());
+      if (!entryPoint)
+      {
+        spdlog::error("Can't get entrypoint {} from {}", ep, source.string());
+        return -2;
+      }
     }
-  }
 
-  std::array<slang::IComponentType*, 2> componentTypes = {slangModule, entryPoint};
-
-  Slang::ComPtr<slang::IComponentType> composedProgram;
-  {
-    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    SlangResult result = session->createCompositeComponentType(
-      componentTypes.data(),
-      componentTypes.size(),
-      composedProgram.writeRef(),
-      diagnosticsBlob.writeRef());
-    diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-    if (!SLANG_SUCCEEDED(result))
+    std::array<slang::IComponentType*, 2> componentTypes = {slangModule, entryPoint};
+    Slang::ComPtr<slang::IComponentType> composedProgram;
     {
-      spdlog::info(
-        "Can't compose program with entrypoint {} from {}", entry_point, source.string());
+      Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+      SlangResult result = session->createCompositeComponentType(
+        componentTypes.data(),
+        componentTypes.size(),
+        composedProgram.writeRef(),
+        diagnosticsBlob.writeRef());
+      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
+      if (!SLANG_SUCCEEDED(result))
+      {
+        spdlog::error("Can't compose program with entrypoint {} from {}", ep, source.string());
+        return -3;
+      }
+    }
+
+    Slang::ComPtr<slang::IComponentType> linkedProgram;
+    {
+      Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+      SlangResult result =
+        composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
+      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
+      if (!SLANG_SUCCEEDED(result))
+      {
+        spdlog::error("Can't link program with entrypoint {} from {}", ep, source.string());
+        return -3;
+      }
+    }
+
+    slang::ProgramLayout* progLayout = linkedProgram->getLayout();
+    slang::EntryPointReflection* entryPointRefl = progLayout->findEntryPointByName(ep.c_str());
+
+    SlangStage stage = entryPointRefl->getStage();
+    auto* bytecodeDest = bytecode_slot(header, stage);
+    if (!bytecodeDest)
+    {
       return -3;
     }
-  }
-
-  Slang::ComPtr<slang::IComponentType> linkedProgram;
-  {
-    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    SlangResult result =
-      composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
-    diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-    if (!SLANG_SUCCEEDED(result))
+    if (slang_shader_ref_has_value(*bytecodeDest))
     {
-      spdlog::info("Can't link program with entrypoint {} from {}", entry_point, source.string());
+      spdlog::error("Duplicate entry point {} for stage {}", ep, stage_name(stage));
       return -3;
     }
-  }
 
-  Slang::ComPtr<slang::IBlob> spirvCode;
-  {
-    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-    SlangResult result = linkedProgram->getEntryPointCode(
-      0, // entryPointIndex
-      0, // targetIndex
-      spirvCode.writeRef(),
-      diagnosticsBlob.writeRef());
-    diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-    if (!SLANG_SUCCEEDED(result))
+    if (stage == SLANG_STAGE_COMPUTE)
     {
-      spdlog::info(
-        "Can't generate spirv for program with entrypoint {} from {}",
-        entry_point,
-        source.string());
-      return -3;
+      SlangUInt sizes[3];
+      entryPointRefl->getComputeThreadGroupSize(3, sizes);
+      header->refl.numThreadsX = sizes[0];
+      header->refl.numThreadsY = sizes[1];
+      header->refl.numThreadsZ = sizes[2];
     }
+
+    // @TODO: fill resource reflection
+
+    Slang::ComPtr<slang::IBlob> spirvCode;
+    {
+      Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+      SlangResult result = linkedProgram->getEntryPointCode(
+        0, // entryPointIndex
+        0, // targetIndex
+        spirvCode.writeRef(),
+        diagnosticsBlob.writeRef());
+      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
+      if (!SLANG_SUCCEEDED(result))
+      {
+        spdlog::error(
+          "Can't generate spirv for program with entrypoint {} from {}", ep, source.string());
+        return -3;
+      }
+    }
+
+    *bytecodeDest = slang_shader_ser_write_bytecode(
+      {(const uint8_t*)spirvCode->getBufferPointer(), spirvCode->getBufferSize()}, sctx);
   }
 
-  if (FILE* f = fopen(to_char_str(dest.string()).c_str(), "wb+"))
+  if (
+    slang_shader_ref_has_value(header->comp) &&
+    (slang_shader_ref_has_value(header->vert) || slang_shader_ref_has_value(header->frag) ||
+     slang_shader_ref_has_value(header->tesc) || slang_shader_ref_has_value(header->tese) ||
+     slang_shader_ref_has_value(header->geom)))
   {
-    // @TODO: serialize header and reflection
-    auto chunks = fwrite(spirvCode->getBufferPointer(), spirvCode->getBufferSize(), 1, f);
-    assert(chunks == 1);
-    fclose(f);
+    spdlog::error("Can't require both graphics and compute entrypoints");
+    return -3;
   }
-  else
+  if (
+    !slang_shader_ref_has_value(header->vert) &&
+    (slang_shader_ref_has_value(header->frag) || slang_shader_ref_has_value(header->tesc) ||
+     slang_shader_ref_has_value(header->tese) || slang_shader_ref_has_value(header->geom)))
   {
-    spdlog::info("Can't open output file {}", dest.string());
+    spdlog::error("Graphics pipeline missing a vertex shader");
+    return -3;
+  }
+  if (
+    (slang_shader_ref_has_value(header->tesc) || slang_shader_ref_has_value(header->tese)) &&
+    (!slang_shader_ref_has_value(header->tesc) || !slang_shader_ref_has_value(header->tese)))
+  {
+    spdlog::error("Tessellation stage requires both hull and domain shaders");
+    return -3;
+  }
+
+  std::string error{};
+  if (!slang_shader_ser_write_to_file(sctx, dest.c_str(), error))
+  {
+    spdlog::error("{}", error);
+    return -3;
   }
 
   if (!dest_depfile.empty())
@@ -256,14 +351,13 @@ int SlangCompiler::compile(
     }
     else
     {
-      spdlog::info("Can't open depfile {}", dest_depfile.string());
+      spdlog::error("Can't open depfile {}", dest_depfile.string());
     }
   }
 
   spdlog::info(
-    "Compiled module from {} with entrypoint {} to {} with depfile {}!",
+    "Compiled module from {} to {} with depfile {}!",
     source.string(),
-    entry_point,
     dest.string(),
     dest_depfile.string());
   return 0;

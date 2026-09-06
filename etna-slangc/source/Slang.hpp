@@ -8,6 +8,7 @@
 
 #include <string>
 #include <filesystem>
+#include <span>
 
 // @TODO: conditional inclusion of the whole slang thing in the binary
 
@@ -30,7 +31,7 @@ public:
 
   int compile(
     const std::filesystem::path& source,
-    std::string_view entry_point,
+    std::span<const std::string> entry_points,
     const std::filesystem::path& dest,
     const std::filesystem::path& dest_depfile = {});
 };

@@ -8,21 +8,22 @@
 #include <filesystem>
 #include <span>
 
-// @TODO: errors
+// @TODO: replace sdlog errors with custom, nicer formatting
+// @TODO: fix all stupid msvc warn-errors
 
 int main(int argc, char** argv)
 {
+  // @TODO: allow multi-source
   std::filesystem::path source = {};
   std::filesystem::path output = {};
   std::filesystem::path depfile = {};
-  std::string entryPoint = {};
+  std::vector<std::string> entryPoints = {};
   SlangCompiler::CreateInfo slangCi{};
 
   CommandlineParser cmdParser{CommandlineParser::CreateInfo{
     .args =
       {
         {.name = {},
-         .kind = CommandlineArgumentKind::STRING,
          .desc = "names source file path to compile",
          .valueCb =
            [&](std::string_view path) {
@@ -39,7 +40,6 @@ int main(int argc, char** argv)
              return true;
            }},
         {.name = {"-I"},
-         .kind = CommandlineArgumentKind::STRING,
          .desc = "adds an include search path",
          .valueCb =
            [&](std::string_view dir) {
@@ -47,7 +47,6 @@ int main(int argc, char** argv)
              return true;
            }},
         {.name = {"-g"},
-         .kind = CommandlineArgumentKind::FLAG,
          .desc = "enables debug info embedding in spirv",
          .cb =
            [&] {
@@ -55,8 +54,7 @@ int main(int argc, char** argv)
              return true;
            }},
         {.name = {"-o"},
-         .kind = CommandlineArgumentKind::STRING,
-         .desc = "specifies output spirv file path",
+         .desc = "specifies output file path",
          .valueCb =
            [&](std::string_view path) {
              if (!output.empty())
@@ -72,7 +70,6 @@ int main(int argc, char** argv)
              return true;
            }},
         {.name = {"-df", "--depfile"},
-         .kind = CommandlineArgumentKind::STRING,
          .desc = "specifies output path for (c)make dependency file",
          .valueCb =
            [&](std::string_view path) {
@@ -89,20 +86,10 @@ int main(int argc, char** argv)
              return true;
            }},
         {.name = {"-e", "--entry-point"},
-         .kind = CommandlineArgumentKind::STRING,
          .desc = "specifies entry point name for compiling the shader",
          .valueCb =
            [&](std::string_view name) {
-             if (!entryPoint.empty())
-             {
-               spdlog::error(
-                 "Invalid usage: can't specify more than one entry point, trying '{}', already "
-                 "specified '{}'",
-                 name,
-                 entryPoint);
-               return false;
-             }
-             entryPoint = name;
+             entryPoints.emplace_back(name);
              return true;
            }},
       },
@@ -124,11 +111,11 @@ int main(int argc, char** argv)
     cmdParser.reportUsageError("missing output file path (-o)");
     return 1;
   }
-  else if (entryPoint.empty())
+  else if (entryPoints.empty())
   {
-    cmdParser.reportUsageError("missing entry point (-e/--entry-point)");
+    cmdParser.reportUsageError("missing entry point(s) (-e/--entry-point)");
     return 1;
   }
 
-  return SlangCompiler{slangCi}.compile(source, entryPoint, output, depfile);
+  return SlangCompiler{slangCi}.compile(source, entryPoints, output, depfile);
 }

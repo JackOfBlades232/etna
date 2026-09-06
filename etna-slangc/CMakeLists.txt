@@ -3,9 +3,11 @@ cmake_minimum_required(VERSION 3.25)
 add_executable(etna-slangc
   "source/main.cpp"
   "source/Slang.cpp"
+  "source/SlangShaderSerialization.cpp"
   "source/Commandline.cpp")
 
 target_include_directories(etna-slangc PRIVATE source)
+target_include_directories(etna-slangc PRIVATE $<TARGET_PROPERTY:etna,INTERFACE_INCLUDE_DIRECTORIES>)
 
 target_link_libraries(etna-slangc PUBLIC
   Slang::slang

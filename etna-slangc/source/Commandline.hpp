@@ -8,26 +8,20 @@
 #include <optional>
 #include <functional>
 
-enum class CommandlineArgumentKind
-{
-  FLAG,
-  STRING
-};
-
 struct CommandlineArgumentName
 {
-  std::string fullName{};
-  std::string shortName{};
+  std::string primaryName{};
+  std::string longName{};
 };
 
 struct CommandlineArgumentDesc
 {
   CommandlineArgumentName name;
-  CommandlineArgumentKind kind;
   std::string desc{};
 
   // Callbacks to consume the value AND report app-specific error logic
   // Should return false if one occurred
+  // Define only one -- cb for flags, valueCb for args with values
   std::optional<std::function<bool()>> cb{};
   std::optional<std::function<bool(std::string_view)>> valueCb{};
 };

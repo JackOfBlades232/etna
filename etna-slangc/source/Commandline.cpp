@@ -9,16 +9,12 @@ CommandlineParser::CommandlineParser(CreateInfo&& ci)
   : args{std::move(ci.args)}
   , programName{std::move(ci.programName)}
 {
-  args.push_back(
-    CommandlineArgumentDesc{
-      .name = std::move(ci.helpArg),
-      .kind = CommandlineArgumentKind::FLAG,
-      .desc = "display help message",
-      .cb = [this] {
-        showHelpMessage();
-        exit(0);
-        return true;
-      }});
+  args.push_back(CommandlineArgumentDesc{
+    .name = std::move(ci.helpArg), .desc = "display help message", .cb = [this] {
+      showHelpMessage();
+      exit(0);
+      return true;
+    }});
 
   std::unordered_set<std::string> uniqueNames{};
   size_t totalNameCount = 0;
@@ -30,35 +26,34 @@ CommandlineParser::CommandlineParser(CreateInfo&& ci)
   helpMessage += "Usage:\n";
   for (const auto& arg : args)
   {
-
-    if (arg.kind == CommandlineArgumentKind::FLAG)
-      assert(arg.cb.has_value());
-    else if (arg.kind == CommandlineArgumentKind::STRING)
-      assert(arg.valueCb.has_value());
+    bool isFlag = arg.cb.has_value();
+    bool isString = arg.valueCb.has_value();
+    assert(isFlag || isString);
+    assert(!isFlag || !isString);
     helpMessage += "  ";
-    if (arg.name.fullName.empty())
+    if (arg.name.primaryName.empty())
     {
-      assert(arg.name.shortName.empty());
-      assert(arg.kind == CommandlineArgumentKind::STRING);
+      assert(arg.name.longName.empty());
+      assert(isString);
       defaultArgId = i;
       helpMessage += "<any arg>";
     }
     else
     {
-      helpMessage += arg.name.fullName;
-      if (!arg.name.shortName.empty())
-        helpMessage += fmt::format(" ({})", arg.name.shortName);
+      helpMessage += arg.name.primaryName;
+      if (!arg.name.longName.empty())
+        helpMessage += fmt::format(" ({})", arg.name.longName);
     }
     if (!arg.desc.empty())
       helpMessage += fmt::format(" -- {}", arg.desc);
     helpMessage += "\n";
 
     ++totalNameCount;
-    uniqueNames.insert(arg.name.fullName);
-    if (!arg.name.shortName.empty())
+    uniqueNames.insert(arg.name.primaryName);
+    if (!arg.name.longName.empty())
     {
       ++totalNameCount;
-      uniqueNames.insert(arg.name.shortName);
+      uniqueNames.insert(arg.name.longName);
     }
 
     ++i;
@@ -74,26 +69,25 @@ int CommandlineParser::parse(std::span<char*> argv) const
     bool handled = false;
     for (const auto& arg : args)
     {
-      if (arg.name.fullName.empty())
+      if (arg.name.primaryName.empty())
         continue;
 
-      bool match = strcmp(arg.name.fullName.c_str(), argv[i]) == 0;
-      if (!match && !arg.name.shortName.empty())
-        match = strcmp(arg.name.shortName.c_str(), argv[i]) == 0;
+      bool match = strcmp(arg.name.primaryName.c_str(), argv[i]) == 0;
+      if (!match && !arg.name.longName.empty())
+        match = strcmp(arg.name.longName.c_str(), argv[i]) == 0;
       if (!match)
         continue;
 
-      switch (arg.kind)
+      if (arg.cb.has_value())
       {
-      case CommandlineArgumentKind::FLAG: {
         if (!arg.cb.value()())
         {
           spdlog::error("{}", helpMessage);
           return 1;
         }
-        break;
       }
-      case CommandlineArgumentKind::STRING: {
+      else if (arg.valueCb.has_value())
+      {
         if (i >= argv.size() - 1)
         {
           spdlog::error("Invalid usage: {} arg requires a string value", argv[i]);
@@ -106,8 +100,6 @@ int CommandlineParser::parse(std::span<char*> argv) const
           spdlog::error("{}", helpMessage);
           return 1;
         }
-        break;
-      }
       }
 
       handled = true;
