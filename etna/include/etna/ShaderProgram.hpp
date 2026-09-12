@@ -5,6 +5,7 @@
 #include <array>
 #include <bitset>
 #include <vector>
+#include <variant>
 #include <unordered_map>
 #include <memory>
 #include <filesystem>
@@ -75,6 +76,7 @@ struct ShaderProgramManager
 
   ShaderProgramId loadProgram(
     const char* name, std::span<std::filesystem::path const> shaders_path);
+  ShaderProgramId loadProgram(const char* name, std::filesystem::path combined_shader_path);
   ShaderProgramId tryGetProgram(const char* name) const;
   ShaderProgramId getProgram(const char* name) const;
 
@@ -127,16 +129,53 @@ private:
   uint32_t registerModule(std::filesystem::path path);
   const ShaderModule& getModule(uint32_t id) const { return *shaderModules.at(id); }
 
+  struct SplitShaderProgramData
+  {
+    std::vector<uint32_t> moduleIds;
+
+    explicit SplitShaderProgramData(std::vector<uint32_t> module_ids)
+      : moduleIds{std::move(module_ids)}
+    {
+    }
+  };
+
+  struct CombinedShaderProgramData
+  {
+    std::filesystem::path path{};
+    vk::UniqueShaderModule vert{};
+    vk::UniqueShaderModule frag{};
+    vk::UniqueShaderModule tesc{};
+    vk::UniqueShaderModule tese{};
+    vk::UniqueShaderModule geom{};
+    vk::UniqueShaderModule comp{};
+    std::string vertEntryPoint{};
+    std::string fragEntryPoint{};
+    std::string tescEntryPoint{};
+    std::string teseEntryPoint{};
+    std::string geomEntryPoint{};
+    std::string compEntryPoint{};
+
+    explicit CombinedShaderProgramData(std::filesystem::path path)
+      : path{std::move(path)}
+    {
+    }
+  };
+
   struct ShaderProgramInternal
   {
     ShaderProgramInternal(std::string in_name, std::vector<uint32_t>&& mod)
-      : name(std::move(in_name))
-      , moduleIds{std::move(mod)}
+      : name{std::move(in_name)}
+      , data{SplitShaderProgramData{std::move(mod)}}
+    {
+    }
+
+    ShaderProgramInternal(std::string in_name, std::filesystem::path path)
+      : name{std::move(in_name)}
+      , data{CombinedShaderProgramData{std::move(path)}}
     {
     }
 
     std::string name;
-    std::vector<uint32_t> moduleIds;
 
     std::bitset<MAX_PROGRAM_DESCRIPTORS> usedDescriptors;
     std::array<DescriptorLayoutId, MAX_PROGRAM_DESCRIPTORS> descriptorIds;
@@ -144,9 +183,11 @@ private:
     vk::PushConstantRange pushConst{};
     vk::UniquePipelineLayout progLayout;
 
-    // @TODO: optional slang-based info here
+    std::variant<SplitShaderProgramData, CombinedShaderProgramData> data;
 
     void reload(ShaderProgramManager& manager);
+    void reloadSplit(ShaderProgramManager& manager, SplitShaderProgramData& split);
+    void reloadCombined(ShaderProgramManager& manager, CombinedShaderProgramData& combined);
   };
 
   std::unordered_map<std::string, ShaderProgramId> programNames;

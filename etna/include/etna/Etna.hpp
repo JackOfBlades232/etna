@@ -63,6 +63,16 @@ void end_frame();
 ShaderProgramId create_program(
   const char* name, std::initializer_list<std::filesystem::path> shaders_path);
 
+/**
+ * \brief Loads a combined shader program with optional reflection info. You can then
+ * use the shader program by it's name to create pipelines.
+ *
+ * \param name The name to give this shader program.
+ * \param shaders_path Path to combined shader binary to use in this program.
+ * \return ID of the newly created shader program.
+ */
+ShaderProgramId create_program(const char* name, std::filesystem::path combined_shader_path);
+
 ShaderProgramId get_program_id(const char* name);
 
 /**

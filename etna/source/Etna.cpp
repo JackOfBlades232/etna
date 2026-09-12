@@ -45,6 +45,12 @@ ShaderProgramId create_program(
   return gContext->getShaderManager().loadProgram(name, shaders_path);
 }
 
+ShaderProgramId create_program(
+  const char* name, std::filesystem::path combined_shader_path)
+{
+  return gContext->getShaderManager().loadProgram(name, combined_shader_path);
+}
+
 ShaderProgramId get_program_id(const char* name)
 {
   return gContext->getShaderManager().tryGetProgram(name);
