@@ -101,15 +101,17 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
   sessionDesc.targets = &targetDesc;
   sessionDesc.targetCount = 1;
 
+  std::vector<std::string> incDirStrings{};
   std::vector<slang::CompilerOptionEntry> options = {
     {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}}};
   for (const auto& incDir : ci.commonIncludeDirs)
   {
+    const auto &str = incDirStrings.emplace_back(to_char_str(incDir.string()));
     options.push_back(slang::CompilerOptionEntry{
       slang::CompilerOptionName::Include,
       slang::CompilerOptionValue{
         .kind = slang::CompilerOptionValueKind::String,
-        .stringValue0 = to_char_str(incDir.string()).c_str()}});
+        .stringValue0 = str.c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
