@@ -406,6 +406,7 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
       }
       modulePushConst.offset = 0u;
       modulePushConst.size = blk.size;
+      modulePushConst.stageFlags = stage;
     }
     else if (spvModule->push_constant_block_count > 1)
     {

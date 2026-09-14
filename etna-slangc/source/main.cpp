@@ -13,7 +13,6 @@
 
 int main(int argc, char** argv)
 {
-  // @TODO: allow multi-source
   std::filesystem::path source = {};
   std::filesystem::path output = {};
   std::filesystem::path depfile = {};

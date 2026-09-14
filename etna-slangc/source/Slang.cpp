@@ -91,7 +91,8 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
   assert(dynlibHandle); // @TODO: proper handling
 
   SlangGlobalSessionDesc desc = {};
-  auto gsRes = slang::createGlobalSession(&desc, globalSession.writeRef());
+  [[maybe_unused]] /* @TODO any mode verification */ auto gsRes =
+    slang::createGlobalSession(&desc, globalSession.writeRef());
   assert(SLANG_SUCCEEDED(gsRes)); // @TODO: proper handling
 
   slang::SessionDesc sessionDesc = {};
@@ -103,21 +104,29 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
 
   std::vector<std::string> incDirStrings{};
   std::vector<slang::CompilerOptionEntry> options = {
-    {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}}};
+    {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}},
+    {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
+  if (ci.emitSpirvDebugInfo)
+  {
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::DebugInformation,
+      slang::CompilerOptionValue{
+        slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
+  }
   for (const auto& incDir : ci.commonIncludeDirs)
   {
-    const auto &str = incDirStrings.emplace_back(to_char_str(incDir.string()));
+    const auto& str = incDirStrings.emplace_back(to_char_str(incDir.string()));
     options.push_back(slang::CompilerOptionEntry{
       slang::CompilerOptionName::Include,
       slang::CompilerOptionValue{
-        .kind = slang::CompilerOptionValueKind::String,
-        .stringValue0 = str.c_str()}});
+        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
   sessionDesc.compilerOptionEntryCount = uint32_t(options.size());
 
-  auto sRes = globalSession->createSession(sessionDesc, session.writeRef());
+  [[maybe_unused]] /* @TODO any mode verification */ auto sRes =
+    globalSession->createSession(sessionDesc, session.writeRef());
   assert(SLANG_SUCCEEDED(sRes)); // @TODO: proper handling
 }
 
@@ -194,6 +203,26 @@ static SlangShaderBytecodeRef* bytecode_slot(SlangShaderHeader* header, SlangSta
   }
 }
 
+// Do it this way to be able to import entry points. Need to beware of conflicts though.
+static Slang::ComPtr<slang::IEntryPoint> find_entry_point_in_session(
+  slang::ISession* session, const char* name)
+{
+  const SlangInt count = session->getLoadedModuleCount();
+
+  for (SlangInt i = 0; i < count; ++i)
+  {
+    slang::IModule* module = session->getLoadedModule(i);
+
+    Slang::ComPtr<slang::IEntryPoint> entryPoint;
+    if (SLANG_SUCCEEDED(module->findEntryPointByName(name, entryPoint.writeRef())))
+    {
+      return entryPoint;
+    }
+  }
+
+  return {};
+}
+
 int SlangCompiler::compile(
   const std::filesystem::path& source,
   std::span<const std::string> entry_points,
@@ -223,6 +252,8 @@ int SlangCompiler::compile(
     {
       Slang::ComPtr<slang::IBlob> diagnosticsBlob;
       slangModule->findEntryPointByName(ep.data(), entryPoint.writeRef());
+      if (!entryPoint)
+        entryPoint = find_entry_point_in_session(session.get(), ep.data());
       if (!entryPoint)
       {
         spdlog::error("Can't get entrypoint {} from {}", ep, source.string());

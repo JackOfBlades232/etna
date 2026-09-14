@@ -17,7 +17,7 @@ CommandlineParser::CommandlineParser(CreateInfo&& ci)
     }});
 
   std::unordered_set<std::string> uniqueNames{};
-  size_t totalNameCount = 0;
+  [[maybe_unused]] /* @TODO any mode verification */ size_t totalNameCount = 0;
 
   defaultArgId = args.size();
 
@@ -26,8 +26,8 @@ CommandlineParser::CommandlineParser(CreateInfo&& ci)
   helpMessage += "Usage:\n";
   for (const auto& arg : args)
   {
-    bool isFlag = arg.cb.has_value();
-    bool isString = arg.valueCb.has_value();
+    [[maybe_unused]] /* @TODO any mode verification */ bool isFlag = arg.cb.has_value();
+    [[maybe_unused]] /* @TODO any mode verification */ bool isString = arg.valueCb.has_value();
     assert(isFlag || isString);
     assert(!isFlag || !isString);
     helpMessage += "  ";
