@@ -60,17 +60,15 @@ struct SlangShaderString
   uint64_t charCount;
 };
 
-struct SlangShaderResolutionPath
+struct SlangShaderResolutionPath : SlangShaderString
 {
-  SlangShaderString leaf;
-  SlangShaderTypedRef<SlangShaderResolutionPath> stem;
 };
 
 struct SlangShaderCbufMemberReflection
 {
   SlangShaderResolutionPath name;
   uint64_t byteOffset;
-  uint64_t elementByteSize;
+  uint64_t elementByteStride;
   uint64_t arrayElementCount;
 };
 
@@ -79,6 +77,7 @@ struct SlangShaderConstbufferReflection
   SlangShaderResolutionPath name;
   SlangShaderTypedArrayRef<SlangShaderCbufMemberReflection> members;
   SlangShaderResourceBinding binding;
+  uint64_t totalByteCount;
 };
 
 struct SlangShaderResourceReflection
@@ -96,9 +95,17 @@ struct SlangShaderDescriptorSetReflection
   uint64_t index;
 };
 
+struct SlangShaderPushConstantsReflection
+{
+  SlangShaderResolutionPath name;
+  SlangShaderTypedArrayRef<SlangShaderCbufMemberReflection> members;
+  uint64_t totalByteCount;
+};
+
 struct SlangShaderReflectionHeader
 {
   SlangShaderTypedArrayRef<SlangShaderDescriptorSetReflection> descriptorSets;
+  SlangShaderPushConstantsReflection pushConstants;
   uint64_t numThreadsX;
   uint64_t numThreadsY;
   uint64_t numThreadsZ;

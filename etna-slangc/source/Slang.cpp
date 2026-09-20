@@ -22,7 +22,7 @@
 
 using namespace etna;
 
-// @TODO: proper error handling
+// @TODO: proper error handling/reporting
 
 static std::optional<std::string> get_env_var(const char* name)
 {
@@ -88,12 +88,12 @@ static void* try_load_slang_dynlib()
 SlangCompiler::SlangCompiler(const CreateInfo& ci)
 {
   dynlibHandle = try_load_slang_dynlib();
-  assert(dynlibHandle); // @TODO: proper handling
+  assert(dynlibHandle);
 
   SlangGlobalSessionDesc desc = {};
   [[maybe_unused]] /* @TODO any mode verification */ auto gsRes =
     slang::createGlobalSession(&desc, globalSession.writeRef());
-  assert(SLANG_SUCCEEDED(gsRes)); // @TODO: proper handling
+  assert(SLANG_SUCCEEDED(gsRes));
 
   slang::SessionDesc sessionDesc = {};
 
@@ -127,7 +127,7 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
 
   [[maybe_unused]] /* @TODO any mode verification */ auto sRes =
     globalSession->createSession(sessionDesc, session.writeRef());
-  assert(SLANG_SUCCEEDED(sRes)); // @TODO: proper handling
+  assert(SLANG_SUCCEEDED(sRes));
 }
 
 SlangCompiler::~SlangCompiler()
@@ -211,16 +211,246 @@ static Slang::ComPtr<slang::IEntryPoint> find_entry_point_in_session(
 
   for (SlangInt i = 0; i < count; ++i)
   {
-    slang::IModule* module = session->getLoadedModule(i);
+    slang::IModule* slangModule = session->getLoadedModule(i);
 
     Slang::ComPtr<slang::IEntryPoint> entryPoint;
-    if (SLANG_SUCCEEDED(module->findEntryPointByName(name, entryPoint.writeRef())))
+    if (SLANG_SUCCEEDED(slangModule->findEntryPointByName(name, entryPoint.writeRef())))
     {
       return entryPoint;
     }
   }
 
   return {};
+}
+
+// @TODO: come up with a way to remove duplication or nah?
+
+struct CbufMemberReflection
+{
+  std::string name;
+  uint64_t byteOffset;
+  uint64_t elementByteStride;
+  uint64_t arrayElementCount;
+};
+
+struct ConstbufferReflection
+{
+  std::string name;
+  std::vector<CbufMemberReflection> members;
+  SlangShaderResourceBinding binding;
+  uint64_t totalByteCount;
+};
+
+struct ResourceReflection
+{
+  std::string name;
+  SlangShaderResourceDesc desc;
+  SlangShaderResourceBinding binding;
+};
+
+struct DescriptorSetReflection
+{
+  std::string name;
+  std::optional<ConstbufferReflection> implicitCbuf;
+  std::vector<ConstbufferReflection> constBuffers;
+  std::vector<ResourceReflection> resources;
+  uint64_t index;
+};
+
+struct PushConstantsReflection
+{
+  std::string name;
+  std::vector<CbufMemberReflection> members;
+  uint64_t totalByteCount;
+};
+
+struct AccessPathNode
+{
+  slang::VariableLayoutReflection* varLayout;
+  AccessPathNode* outer;
+};
+
+struct AccessPath
+{
+  AccessPathNode* leaf;
+  AccessPathNode* deepestCbuf;
+  AccessPathNode* deepestParblock;
+};
+
+struct CombinedOffset
+{
+  uint32_t dset;
+  uint32_t binding;
+  uint32_t byteOffset;
+};
+
+static CombinedOffset calculate_combined_offset(AccessPath path)
+{
+  CombinedOffset offset = {};
+  bool reachedCbuf = false;
+  bool reachedParblock = false;
+  for (auto* node = path.leaf; node; node = node->outer)
+  {
+    if (!reachedParblock)
+    {
+      reachedParblock = node == path.deepestParblock;
+      if (!reachedParblock)
+      {
+        offset.binding += node->varLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot);
+        offset.dset +=
+          node->varLayout->getBindingSpace(slang::ParameterCategory::DescriptorTableSlot);
+      }
+    }
+
+    if (!reachedCbuf)
+    {
+      reachedCbuf = node == path.deepestCbuf;
+      if (!reachedCbuf)
+        offset.byteOffset += node->varLayout->getOffset();
+    }
+
+    if (reachedCbuf && reachedParblock)
+      break;
+  }
+  assert(offset.dset == 0);
+  for (auto* node = path.deepestParblock; node; node = node->outer)
+    offset.dset += node->varLayout->getOffset(slang::ParameterCategory::SubElementRegisterSpace);
+  return offset;
+}
+
+static bool dset_is_empty(const DescriptorSetReflection& dset)
+{
+  return dset.constBuffers.empty() && dset.resources.empty() && !dset.implicitCbuf.has_value();
+}
+
+static void compile_resource_to_dset(
+  DescriptorSetReflection& dset,
+  slang::VariableLayoutReflection* var,
+  slang::TypeReflection::Kind kind,
+  AccessPath path)
+{
+  ResourceReflection resource = {};
+  assert(var->getName());
+  resource.name = var->getName();
+
+  // @TODO: desc
+
+  assert(var->getCategory() == slang::ParameterCategory::DescriptorTableSlot);
+  slang::TypeLayoutReflection* type = var->getTypeLayout();
+  (void)type;
+  (void)kind;
+  (void)path;
+
+  dset.resources.push_back(resource);
+}
+
+static void compile_dset_element(
+  DescriptorSetReflection& dset,
+  slang::VariableLayoutReflection* var,
+  AccessPath path,
+  const char* implicit_name = nullptr)
+{
+  const char* name = var->getName();
+  if (!name)
+    name = implicit_name;
+  if (!name)
+    return;
+
+  AccessPathNode node{var, path.leaf};
+  AccessPath elemPath = {&node, path.deepestCbuf, path.deepestParblock};
+
+  slang::TypeLayoutReflection* type = var->getTypeLayout();
+  auto typeKind = type->getKind();
+  switch (typeKind)
+  {
+  case slang::TypeReflection::Kind::Struct: {
+    break;
+  }
+  case slang::TypeReflection::Kind::Array: {
+    break;
+  }
+  case slang::TypeReflection::Kind::Matrix:
+  case slang::TypeReflection::Kind::Vector:
+  case slang::TypeReflection::Kind::Scalar: {
+    break;
+  }
+  case slang::TypeReflection::Kind::ConstantBuffer: {
+    break;
+  }
+  case slang::TypeReflection::Kind::ParameterBlock: {
+    break;
+  }
+  case slang::TypeReflection::Kind::Resource:
+  case slang::TypeReflection::Kind::SamplerState:
+  case slang::TypeReflection::Kind::TextureBuffer:
+  case slang::TypeReflection::Kind::ShaderStorageBuffer: {
+    compile_resource_to_dset(dset, var, typeKind, elemPath);
+    break;
+  }
+
+  default:
+    assert(0);
+    break;
+  }
+}
+
+static DescriptorSetReflection compile_dset_reflection(
+  slang::VariableLayoutReflection* var, AccessPath path, const char* implicit_name = nullptr)
+{
+  const char* name = var->getName();
+  if (!name)
+    name = implicit_name;
+  if (!name)
+    return {};
+
+  DescriptorSetReflection dset{};
+  dset.name = name;
+
+  AccessPathNode node{var, path.leaf};
+  AccessPath dsetPath = {&node, &node, &node};
+  CombinedOffset offset = calculate_combined_offset(path);
+  dset.index = offset.dset;
+
+  slang::TypeLayoutReflection* type = var->getTypeLayout();
+  auto typeKind = type->getKind();
+  switch (typeKind)
+  {
+  case slang::TypeReflection::Kind::Struct: {
+    int fieldCount = type->getFieldCount();
+    for (int f = 0; f < fieldCount; ++f)
+    {
+      slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
+      compile_dset_element(dset, field, dsetPath, "$ImplicitCbuf");
+    }
+    break;
+  }
+  case slang::TypeReflection::Kind::Array: {
+    break;
+  }
+  case slang::TypeReflection::Kind::Matrix:
+  case slang::TypeReflection::Kind::Vector:
+  case slang::TypeReflection::Kind::Scalar: {
+    break;
+  }
+  case slang::TypeReflection::Kind::ConstantBuffer: {
+    break;
+  }
+  case slang::TypeReflection::Kind::ParameterBlock: {
+    break;
+  }
+  case slang::TypeReflection::Kind::Resource:
+  case slang::TypeReflection::Kind::SamplerState:
+  case slang::TypeReflection::Kind::TextureBuffer:
+  case slang::TypeReflection::Kind::ShaderStorageBuffer: {
+    break;
+  }
+
+  default:
+    assert(0);
+    break;
+  }
+
+  return dset;
 }
 
 int SlangCompiler::compile(
@@ -245,6 +475,9 @@ int SlangCompiler::compile(
     sctx.ref<SlangShaderHeader>(slang_shader_ser_write_type<SlangShaderHeader>({}, sctx));
   header->magic = SLANG_SHADER_MAGIC;
   header->version = SLANG_SHADER_VERSION;
+
+  std::vector<DescriptorSetReflection> rtDsets = {};
+  PushConstantsReflection rtPushConst = {};
 
   for (const auto& ep : entry_points)
   {
@@ -293,6 +526,7 @@ int SlangCompiler::compile(
 
     slang::ProgramLayout* progLayout = linkedProgram->getLayout();
     slang::EntryPointReflection* entryPointRefl = progLayout->findEntryPointByName(ep.c_str());
+    assert(progLayout->getEntryPointCount() == 1);
 
     SlangStage stage = entryPointRefl->getStage();
     auto* bytecodeDest = bytecode_slot(header, stage);
@@ -306,6 +540,29 @@ int SlangCompiler::compile(
       return -3;
     }
 
+    // @TODO: fill resource reflection
+    {
+      std::vector<DescriptorSetReflection> dsets{};
+      PushConstantsReflection pushConsts{};
+
+      slang::VariableLayoutReflection* globalScope = progLayout->getGlobalParamsVarLayout();
+      slang::VariableLayoutReflection* entryPointScope = entryPointRefl->getVarLayout();
+
+      // @TEST
+      {
+        auto dset = compile_dset_reflection(globalScope, {}, "$Global");
+        if (!dset_is_empty(dset))
+          dsets.push_back(dset);
+      }
+      {
+        auto dset = compile_dset_reflection(entryPointScope, {}, "$EntryPoint");
+        if (!dset_is_empty(dset))
+          dsets.push_back(dset);
+      }
+
+      spdlog::info("{} {}", (void*)globalScope, (void*)entryPointScope);
+    }
+
     if (stage == SLANG_STAGE_COMPUTE)
     {
       SlangUInt sizes[3];
@@ -315,16 +572,11 @@ int SlangCompiler::compile(
       header->refl.numThreadsZ = sizes[2];
     }
 
-    // @TODO: fill resource reflection
-
     Slang::ComPtr<slang::IBlob> spirvCode;
     {
       Slang::ComPtr<slang::IBlob> diagnosticsBlob;
-      SlangResult result = linkedProgram->getEntryPointCode(
-        0, // entryPointIndex
-        0, // targetIndex
-        spirvCode.writeRef(),
-        diagnosticsBlob.writeRef());
+      SlangResult result =
+        linkedProgram->getEntryPointCode(0, 0, spirvCode.writeRef(), diagnosticsBlob.writeRef());
       diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
       if (!SLANG_SUCCEEDED(result))
       {
