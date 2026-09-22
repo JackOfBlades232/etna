@@ -52,6 +52,13 @@ int main(int argc, char** argv)
              slangCi.emitSpirvDebugInfo = true;
              return true;
            }},
+        {.name = {"-werror"},
+         .desc = "treat slang compiler warnings as errors",
+         .cb =
+           [&] {
+             slangCi.warningsAsErrors = true;
+             return true;
+           }},
         {.name = {"-o"},
          .desc = "specifies output file path",
          .valueCb =

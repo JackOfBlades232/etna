@@ -23,6 +23,7 @@ public:
   {
     std::vector<std::filesystem::path> commonIncludeDirs = {};
     bool emitSpirvDebugInfo = false;
+    bool warningsAsErrors = false;
   };
 
   explicit SlangCompiler(const CreateInfo& ci);

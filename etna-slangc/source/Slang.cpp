@@ -113,6 +113,13 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
       slang::CompilerOptionValue{
         slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
   }
+  if (ci.warningsAsErrors)
+  {
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::WarningsAsErrors,
+      slang::CompilerOptionValue{
+        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
+  }
   for (const auto& incDir : ci.commonIncludeDirs)
   {
     const auto& str = incDirStrings.emplace_back(to_char_str(incDir.string()));
@@ -224,6 +231,7 @@ static Slang::ComPtr<slang::IEntryPoint> find_entry_point_in_session(
 }
 
 // @TODO: come up with a way to remove duplication or nah?
+static constexpr size_t PREALLOC_COUNT = 512; // Imposed max for pointer stability
 
 struct CbufMemberReflection
 {
@@ -251,17 +259,19 @@ struct ResourceReflection
 struct DescriptorSetReflection
 {
   std::string name;
-  std::optional<ConstbufferReflection> implicitCbuf;
   std::vector<ConstbufferReflection> constBuffers;
   std::vector<ResourceReflection> resources;
   uint64_t index;
 };
 
-struct PushConstantsReflection
+struct PushConstantsReflection : ConstbufferReflection
 {
-  std::string name;
-  std::vector<CbufMemberReflection> members;
-  uint64_t totalByteCount;
+};
+
+struct ShaderReflection
+{
+  std::vector<DescriptorSetReflection> dsets;
+  PushConstantsReflection pushConsts;
 };
 
 struct AccessPathNode
@@ -293,7 +303,7 @@ static CombinedOffset calculate_combined_offset(AccessPath path)
   {
     if (!reachedParblock)
     {
-      reachedParblock = node == path.deepestParblock;
+      reachedParblock |= node == path.deepestParblock;
       if (!reachedParblock)
       {
         offset.binding += node->varLayout->getOffset(slang::ParameterCategory::DescriptorTableSlot);
@@ -304,7 +314,7 @@ static CombinedOffset calculate_combined_offset(AccessPath path)
 
     if (!reachedCbuf)
     {
-      reachedCbuf = node == path.deepestCbuf;
+      reachedCbuf |= node == path.deepestCbuf;
       if (!reachedCbuf)
         offset.byteOffset += node->varLayout->getOffset();
     }
@@ -320,99 +330,38 @@ static CombinedOffset calculate_combined_offset(AccessPath path)
 
 static bool dset_is_empty(const DescriptorSetReflection& dset)
 {
-  return dset.constBuffers.empty() && dset.resources.empty() && !dset.implicitCbuf.has_value();
-}
-
-static void compile_resource_to_dset(
-  DescriptorSetReflection& dset,
-  slang::VariableLayoutReflection* var,
-  slang::TypeReflection::Kind kind,
-  AccessPath path)
-{
-  ResourceReflection resource = {};
-  assert(var->getName());
-  resource.name = var->getName();
-
-  // @TODO: desc
-
-  assert(var->getCategory() == slang::ParameterCategory::DescriptorTableSlot);
-  slang::TypeLayoutReflection* type = var->getTypeLayout();
-  (void)type;
-  (void)kind;
-  (void)path;
-
-  dset.resources.push_back(resource);
+  return dset.constBuffers.empty() && dset.resources.empty();
 }
 
 static void compile_dset_element(
+  ShaderReflection& refl,
   DescriptorSetReflection& dset,
+  ConstbufferReflection* cbuf,
   slang::VariableLayoutReflection* var,
   AccessPath path,
-  const char* implicit_name = nullptr)
+  size_t arraySize,
+  const char* base_name);
+
+static void compile_dset_element(
+  ShaderReflection& refl,
+  DescriptorSetReflection& dset,
+  ConstbufferReflection* cbuf,
+  slang::TypeLayoutReflection* type,
+  AccessPath path,
+  size_t arraySize,
+  const char* name)
 {
-  const char* name = var->getName();
-  if (!name)
-    name = implicit_name;
-  if (!name)
-    return;
-
-  AccessPathNode node{var, path.leaf};
-  AccessPath elemPath = {&node, path.deepestCbuf, path.deepestParblock};
-
-  slang::TypeLayoutReflection* type = var->getTypeLayout();
   auto typeKind = type->getKind();
-  switch (typeKind)
+  auto parCat = type->getParameterCategory();
+  if (
+    parCat != slang::ParameterCategory::Mixed &&               //
+    parCat != slang::ParameterCategory::Uniform &&             //
+    parCat != slang::ParameterCategory::DescriptorTableSlot && //
+    parCat != slang::ParameterCategory::PushConstantBuffer &&  //
+    parCat != slang::ParameterCategory::SubElementRegisterSpace)
   {
-  case slang::TypeReflection::Kind::Struct: {
-    break;
+    return;
   }
-  case slang::TypeReflection::Kind::Array: {
-    break;
-  }
-  case slang::TypeReflection::Kind::Matrix:
-  case slang::TypeReflection::Kind::Vector:
-  case slang::TypeReflection::Kind::Scalar: {
-    break;
-  }
-  case slang::TypeReflection::Kind::ConstantBuffer: {
-    break;
-  }
-  case slang::TypeReflection::Kind::ParameterBlock: {
-    break;
-  }
-  case slang::TypeReflection::Kind::Resource:
-  case slang::TypeReflection::Kind::SamplerState:
-  case slang::TypeReflection::Kind::TextureBuffer:
-  case slang::TypeReflection::Kind::ShaderStorageBuffer: {
-    compile_resource_to_dset(dset, var, typeKind, elemPath);
-    break;
-  }
-
-  default:
-    assert(0);
-    break;
-  }
-}
-
-static DescriptorSetReflection compile_dset_reflection(
-  slang::VariableLayoutReflection* var, AccessPath path, const char* implicit_name = nullptr)
-{
-  const char* name = var->getName();
-  if (!name)
-    name = implicit_name;
-  if (!name)
-    return {};
-
-  DescriptorSetReflection dset{};
-  dset.name = name;
-
-  AccessPathNode node{var, path.leaf};
-  AccessPath dsetPath = {&node, &node, &node};
-  CombinedOffset offset = calculate_combined_offset(path);
-  dset.index = offset.dset;
-
-  slang::TypeLayoutReflection* type = var->getTypeLayout();
-  auto typeKind = type->getKind();
   switch (typeKind)
   {
   case slang::TypeReflection::Kind::Struct: {
@@ -420,28 +369,141 @@ static DescriptorSetReflection compile_dset_reflection(
     for (int f = 0; f < fieldCount; ++f)
     {
       slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
-      compile_dset_element(dset, field, dsetPath, "$ImplicitCbuf");
+      // @TODO: do we propagate array counts? How do arrays of structures work?
+      compile_dset_element(refl, dset, cbuf, field, path, 1, name);
     }
     break;
   }
   case slang::TypeReflection::Kind::Array: {
+    // We don't really care about dimensionality here, since etna binding API is flat
+    size_t slangElementCount = type->getTotalArrayElementCount();
+    assert(slangElementCount != SLANG_UNKNOWN_SIZE);
+    uint64_t elementCount =
+      slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
+    compile_dset_element(refl, dset, cbuf, type->getElementTypeLayout(), path, elementCount, name);
     break;
   }
   case slang::TypeReflection::Kind::Matrix:
   case slang::TypeReflection::Kind::Vector:
   case slang::TypeReflection::Kind::Scalar: {
+    assert(cbuf);
+    assert(cbuf->members.size() < PREALLOC_COUNT);
+    auto& member = cbuf->members.emplace_back();
+    member.name = name;
+    member.byteOffset = calculate_combined_offset(path).byteOffset;
+    member.elementByteStride = type->getStride(slang::ParameterCategory::Uniform);
+    member.arrayElementCount = arraySize;
     break;
   }
   case slang::TypeReflection::Kind::ConstantBuffer: {
+    slang::VariableLayoutReflection* implicitVar = type->getContainerVarLayout();
+    slang::TypeLayoutReflection* innerType = type->getElementTypeLayout();
+
+    ConstbufferReflection* nestedCbuf = nullptr;
+
+    slang::TypeLayoutReflection* implicitVarType = implicitVar->getTypeLayout();
+    if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
+        binds > 0)
+    {
+      auto offset = calculate_combined_offset({path.leaf, path.leaf, path.deepestParblock});
+      assert(dset.constBuffers.size() < PREALLOC_COUNT);
+      nestedCbuf = &dset.constBuffers.emplace_back();
+      nestedCbuf->name = name;
+      nestedCbuf->binding = {offset.binding, binds};
+      nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      assert(binds == 1);
+      assert(nestedCbuf->totalByteCount > 0);
+    }
+    else if (auto binds = implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer);
+             binds > 0)
+    {
+      assert(refl.pushConsts.members.empty());
+      assert(refl.pushConsts.totalByteCount == 0);
+      refl.pushConsts.name = name;
+      refl.pushConsts.totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      nestedCbuf = &refl.pushConsts;
+      assert(binds == 1);
+      assert(nestedCbuf->totalByteCount > 0);
+    }
+    else
+    {
+      assert(innerType->getSize(slang::ParameterCategory::Uniform) == 0);
+    }
+
+    if (nestedCbuf)
+    {
+      assert(
+        nestedCbuf->totalByteCount < SLANG_UNBOUNDED_SIZE); // This is a slangc bug @TODO report
+    }
+
+    compile_dset_element(
+      refl,
+      dset,
+      nestedCbuf,
+      innerType,
+      {path.leaf, path.leaf, path.deepestParblock},
+      arraySize,
+      name);
+
     break;
   }
   case slang::TypeReflection::Kind::ParameterBlock: {
+    slang::VariableLayoutReflection* implicitVar = type->getContainerVarLayout();
+    slang::TypeLayoutReflection* innerType = type->getElementTypeLayout();
+
+    assert(refl.dsets.size() < PREALLOC_COUNT);
+    DescriptorSetReflection& nestedDset = refl.dsets.emplace_back();
+    ConstbufferReflection* nestedCbuf = nullptr;
+
+    // Dsets are root names even when inside implicit ones
+    const char* dsetName = strrchr(name, ':');
+    if (dsetName)
+      ++dsetName;
+    else
+      dsetName = name;
+
+    nestedDset.name = dsetName;
+
+    slang::TypeLayoutReflection* implicitVarType = implicitVar->getTypeLayout();
+    auto slots = implicitVarType->getSize(slang::ParameterCategory::SubElementRegisterSpace);
+    assert(slots == 1);
+
+    if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
+        binds > 0)
+    {
+      auto offset = calculate_combined_offset({path.leaf, path.leaf, path.leaf});
+      nestedCbuf = &nestedDset.constBuffers.emplace_back();
+      nestedCbuf->name = dsetName;
+      nestedCbuf->binding = {offset.binding, binds};
+      nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      assert(binds == 1);
+      assert(nestedCbuf->totalByteCount > 0);
+    }
+
+    assert(implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer) == 0);
+
+    compile_dset_element(
+      refl,
+      nestedDset,
+      nestedCbuf,
+      innerType,
+      {path.leaf, path.leaf, path.leaf},
+      arraySize,
+      dsetName);
+
     break;
   }
-  case slang::TypeReflection::Kind::Resource:
+  case slang::TypeReflection::Kind::Resource: {
+    auto& res = dset.resources.emplace_back();
+    res.name = name;
+    res.desc = {}; // @TODO
+    res.binding = {calculate_combined_offset(path).binding, arraySize};
+    break;
+  }
   case slang::TypeReflection::Kind::SamplerState:
   case slang::TypeReflection::Kind::TextureBuffer:
   case slang::TypeReflection::Kind::ShaderStorageBuffer: {
+    assert(0);
     break;
   }
 
@@ -449,8 +511,36 @@ static DescriptorSetReflection compile_dset_reflection(
     assert(0);
     break;
   }
+}
 
-  return dset;
+static void compile_dset_element(
+  ShaderReflection& refl,
+  DescriptorSetReflection& dset,
+  ConstbufferReflection* cbuf,
+  slang::VariableLayoutReflection* var,
+  AccessPath path,
+  size_t arraySize,
+  const char* base_name)
+{
+  const char* leaf_name = var->getName();
+  assert(base_name || leaf_name);
+  std::string name{base_name};
+  if (leaf_name)
+  {
+    if (base_name)
+      name += "::";
+    name += leaf_name;
+  }
+
+  AccessPathNode node{var, path.leaf};
+  compile_dset_element(
+    refl,
+    dset,
+    cbuf,
+    var->getTypeLayout(),
+    {&node, path.deepestCbuf, path.deepestParblock},
+    arraySize,
+    name.c_str());
 }
 
 int SlangCompiler::compile(
@@ -476,8 +566,7 @@ int SlangCompiler::compile(
   header->magic = SLANG_SHADER_MAGIC;
   header->version = SLANG_SHADER_VERSION;
 
-  std::vector<DescriptorSetReflection> rtDsets = {};
-  PushConstantsReflection rtPushConst = {};
+  ShaderReflection combinedShaderReflection = {};
 
   for (const auto& ep : entry_points)
   {
@@ -540,25 +629,21 @@ int SlangCompiler::compile(
       return -3;
     }
 
-    // @TODO: fill resource reflection
     {
-      std::vector<DescriptorSetReflection> dsets{};
-      PushConstantsReflection pushConsts{};
+      ShaderReflection shaderReflection = {};
+      shaderReflection.dsets.reserve(PREALLOC_COUNT);
 
       slang::VariableLayoutReflection* globalScope = progLayout->getGlobalParamsVarLayout();
       slang::VariableLayoutReflection* entryPointScope = entryPointRefl->getVarLayout();
 
-      // @TEST
-      {
-        auto dset = compile_dset_reflection(globalScope, {}, "$Global");
-        if (!dset_is_empty(dset))
-          dsets.push_back(dset);
-      }
-      {
-        auto dset = compile_dset_reflection(entryPointScope, {}, "$EntryPoint");
-        if (!dset_is_empty(dset))
-          dsets.push_back(dset);
-      }
+      DescriptorSetReflection& globalDset = shaderReflection.dsets.emplace_back();
+      globalDset.name = "";
+
+      compile_dset_element(shaderReflection, globalDset, nullptr, globalScope, {}, 1, "");
+      compile_dset_element(
+        shaderReflection, globalDset, nullptr, entryPointScope, {}, 1, "$EntryPoint");
+
+      std::erase_if(shaderReflection.dsets, dset_is_empty);
 
       spdlog::info("{} {}", (void*)globalScope, (void*)entryPointScope);
     }
