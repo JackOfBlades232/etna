@@ -233,18 +233,9 @@ static Slang::ComPtr<slang::IEntryPoint> find_entry_point_in_session(
 // @TODO: come up with a way to remove duplication or nah?
 static constexpr size_t PREALLOC_COUNT = 512; // Imposed max for pointer stability
 
-struct CbufMemberReflection
-{
-  std::string name;
-  uint64_t byteOffset;
-  uint64_t elementByteStride;
-  uint64_t arrayElementCount;
-};
-
 struct ConstbufferReflection
 {
   std::string name;
-  std::vector<CbufMemberReflection> members;
   SlangShaderResourceBinding binding;
   uint64_t totalByteCount;
 };
@@ -369,8 +360,7 @@ static void compile_dset_element(
     for (int f = 0; f < fieldCount; ++f)
     {
       slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
-      // @TODO: do we propagate array counts? How do arrays of structures work?
-      compile_dset_element(refl, dset, cbuf, field, path, 1, name);
+      compile_dset_element(refl, dset, cbuf, field, path, arraySize, name);
     }
     break;
   }
@@ -380,21 +370,21 @@ static void compile_dset_element(
     assert(slangElementCount != SLANG_UNKNOWN_SIZE);
     uint64_t elementCount =
       slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
-    compile_dset_element(refl, dset, cbuf, type->getElementTypeLayout(), path, elementCount, name);
+    std::string arrayName = fmt::format("{}[{}]", name, type->getElementCount());
+    compile_dset_element(
+      refl,
+      dset,
+      cbuf,
+      type->getElementTypeLayout(),
+      path,
+      arraySize * elementCount,
+      arrayName.c_str());
     break;
   }
   case slang::TypeReflection::Kind::Matrix:
   case slang::TypeReflection::Kind::Vector:
-  case slang::TypeReflection::Kind::Scalar: {
-    assert(cbuf);
-    assert(cbuf->members.size() < PREALLOC_COUNT);
-    auto& member = cbuf->members.emplace_back();
-    member.name = name;
-    member.byteOffset = calculate_combined_offset(path).byteOffset;
-    member.elementByteStride = type->getStride(slang::ParameterCategory::Uniform);
-    member.arrayElementCount = arraySize;
+  case slang::TypeReflection::Kind::Scalar:
     break;
-  }
   case slang::TypeReflection::Kind::ConstantBuffer: {
     slang::VariableLayoutReflection* implicitVar = type->getContainerVarLayout();
     slang::TypeLayoutReflection* innerType = type->getElementTypeLayout();
@@ -409,7 +399,7 @@ static void compile_dset_element(
       assert(dset.constBuffers.size() < PREALLOC_COUNT);
       nestedCbuf = &dset.constBuffers.emplace_back();
       nestedCbuf->name = name;
-      nestedCbuf->binding = {offset.binding, binds};
+      nestedCbuf->binding = {offset.binding, binds * arraySize};
       nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       assert(binds == 1);
       assert(nestedCbuf->totalByteCount > 0);
@@ -417,12 +407,12 @@ static void compile_dset_element(
     else if (auto binds = implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer);
              binds > 0)
     {
-      assert(refl.pushConsts.members.empty());
       assert(refl.pushConsts.totalByteCount == 0);
       refl.pushConsts.name = name;
       refl.pushConsts.totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       nestedCbuf = &refl.pushConsts;
       assert(binds == 1);
+      assert(arraySize == 1);
       assert(nestedCbuf->totalByteCount > 0);
     }
     else
@@ -467,6 +457,7 @@ static void compile_dset_element(
     slang::TypeLayoutReflection* implicitVarType = implicitVar->getTypeLayout();
     auto slots = implicitVarType->getSize(slang::ParameterCategory::SubElementRegisterSpace);
     assert(slots == 1);
+    assert(arraySize == 1);
 
     if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
         binds > 0)
