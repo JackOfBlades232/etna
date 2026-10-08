@@ -12,6 +12,7 @@ target_include_directories(etna-slangc PRIVATE $<TARGET_PROPERTY:etna,INTERFACE_
 target_link_libraries(etna-slangc PUBLIC
   Slang::slang
   spdlog::spdlog
+  "SPIRV-Tools-static"
 )
 
 # @TODO: move to common code

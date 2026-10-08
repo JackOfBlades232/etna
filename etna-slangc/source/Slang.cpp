@@ -7,6 +7,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <spirv-tools/libspirv.hpp>
+
 #include <cstdlib>
 #include <cassert>
 #include <optional>
@@ -105,6 +107,7 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
   std::vector<std::string> incDirStrings{};
   std::vector<slang::CompilerOptionEntry> options = {
     {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}},
+    {slang::CompilerOptionName::SkipSPIRVValidation, {slang::CompilerOptionValueKind::Int, 0}},
     {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
   if (ci.emitSpirvDebugInfo)
   {
@@ -324,6 +327,15 @@ static bool dset_is_empty(const DescriptorSetReflection& dset)
   return dset.constBuffers.empty() && dset.resources.empty();
 }
 
+static uint64_t array_size_mul(size_t base, size_t mul)
+{
+  if (base == 0 || mul == 0)
+    return 0;
+  if (base == UINT64_MAX || mul == UINT64_MAX)
+    return UINT64_MAX;
+  return base * mul;
+}
+
 static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
@@ -368,6 +380,16 @@ static void compile_dset_element(
     // We don't really care about dimensionality here, since etna binding API is flat
     size_t slangElementCount = type->getTotalArrayElementCount();
     assert(slangElementCount != SLANG_UNKNOWN_SIZE);
+
+    // @BUG: this is a bug of the current slang reflection
+    // This basically makes [0] and [] indiscriminable
+    // We could do gymnastics with parsing spirv as well and inferring
+    // what the type is, but for simplicity let's just consider them
+    // all unsized -- in any case, 0 sized arrays can't de addressed
+    // and they will never make it to codegen
+    if (slangElementCount == 0)
+      slangElementCount = SLANG_UNBOUNDED_SIZE;
+
     uint64_t elementCount =
       slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
     std::string arrayName = fmt::format("{}[{}]", name, type->getElementCount());
@@ -377,7 +399,7 @@ static void compile_dset_element(
       cbuf,
       type->getElementTypeLayout(),
       path,
-      arraySize * elementCount,
+      array_size_mul(arraySize, elementCount),
       arrayName.c_str());
     break;
   }
@@ -399,7 +421,7 @@ static void compile_dset_element(
       assert(dset.constBuffers.size() < PREALLOC_COUNT);
       nestedCbuf = &dset.constBuffers.emplace_back();
       nestedCbuf->name = name;
-      nestedCbuf->binding = {offset.binding, binds * arraySize};
+      nestedCbuf->binding = {offset.binding, array_size_mul(binds, arraySize)};
       nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       assert(binds == 1);
       assert(nestedCbuf->totalByteCount > 0);
@@ -418,12 +440,6 @@ static void compile_dset_element(
     else
     {
       assert(innerType->getSize(slang::ParameterCategory::Uniform) == 0);
-    }
-
-    if (nestedCbuf)
-    {
-      assert(
-        nestedCbuf->totalByteCount < SLANG_UNBOUNDED_SIZE); // This is a slangc bug @TODO report
     }
 
     compile_dset_element(
@@ -559,6 +575,13 @@ int SlangCompiler::compile(
 
   ShaderReflection combinedShaderReflection = {};
 
+  spvtools::SpirvTools spvTools(SPV_ENV_UNIVERSAL_1_6); // for validation
+  auto printMsgToErrlog =
+    [](spv_message_level_t, const char*, const spv_position_t&, const char* m) {
+      spdlog::error("{}", m);
+    };
+  spvTools.SetMessageConsumer(printMsgToErrlog);
+
   for (const auto& ep : entry_points)
   {
     Slang::ComPtr<slang::IEntryPoint> entryPoint;
@@ -660,6 +683,15 @@ int SlangCompiler::compile(
           "Can't generate spirv for program with entrypoint {} from {}", ep, source.string());
         return -3;
       }
+    }
+
+    if (!spvTools.Validate(
+          (const uint32_t*)spirvCode->getBufferPointer(),
+          spirvCode->getBufferSize() / sizeof(uint32_t)))
+    {
+      spdlog::error(
+        "Generated invalid spirv for program with entrypoint {} from {}", ep, source.string());
+      return -3;
     }
 
     *bytecodeDest = slang_shader_ser_write_bytecode(

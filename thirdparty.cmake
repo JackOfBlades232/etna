@@ -31,6 +31,32 @@ CPMAddPackage(
 # SpirvReflect headers also emit warnings now
 set_property(TARGET spirv-reflect-static PROPERTY SYSTEM TRUE)
 
+CPMAddPackage(
+  NAME SpirvHeaders
+  GITHUB_REPOSITORY KhronosGroup/SPIRV-Headers
+  GIT_TAG "vulkan-sdk-${Vulkan_VERSION}"
+  OPTIONS
+    "SPIRV_HEADERS_EXECUTABLE OFF"
+    "SPIRV_HEADERS_STRIPPER OFF"
+    "SPIRV_HEADERS_EXAMPLES OFF"
+    "SPIRV_HEADERS_BUILD_TESTS OFF"
+    "SPIRV_HEADERS_STATIC_LIB ON"
+)
+CPMAddPackage(
+  NAME SpirvTools
+  GITHUB_REPOSITORY KhronosGroup/SPIRV-Tools
+  GIT_TAG "vulkan-sdk-${Vulkan_VERSION}"
+  OPTIONS
+    "SKIP_SPIRV_TOOLS_INSTALL ON"
+    "SPIRV_BUILD_FUZZER OFF"
+    "SPIRV_BUILD_COMPRESSION OFF"
+    "SPIRV_BUILD_LIBFUZZER_TARGETS OFF"
+    "SPIRV_SKIP_EXECUTABLES ON"
+    "SPIRV_SKIP_TESTS ON"
+    "SPIRV_TOOLS_BUILD_STATIC ON"
+)
+set_property(TARGET SPIRV-Tools-static PROPERTY SYSTEM TRUE)
+
 # Fmt is a dependency of spdlog, but to be
 # safe we explicitly specify our version
 CPMAddPackage(
