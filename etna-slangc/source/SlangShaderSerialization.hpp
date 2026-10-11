@@ -42,6 +42,8 @@ public:
 inline etna::SlangShaderBytecodeRef slang_shader_ser_write_bytecode(
   std::span<const uint8_t> bytecode, SlangShaderSerializationContext& data)
 {
+  if (bytecode.empty())
+    return {};
   etna::SlangShaderBytecodeRef ref = {data.totalBytes(), bytecode.size()};
   auto alignedSize = align_up_pot(bytecode.size(), sizeof(uint64_t));
   auto& chunk = data.pushChunk(alignedSize);
@@ -52,9 +54,11 @@ inline etna::SlangShaderBytecodeRef slang_shader_ser_write_bytecode(
 
 template <class T>
   requires(sizeof(T) % sizeof(uint64_t) == 0 && alignof(T) <= sizeof(uint64_t))
-etna::SlangShaderTypedArrayRef<T> slang_shader_ser_write_typed_array(
+inline etna::SlangShaderTypedArrayRef<T> slang_shader_ser_write_typed_array(
   std::span<const T> array, SlangShaderSerializationContext& data)
 {
+  if (array.empty())
+    return {};
   etna::SlangShaderTypedArrayRef<T> ref = {{data.totalBytes()}, array.size()};
   auto& chunk = data.pushChunk(array.size() * sizeof(T));
   std::copy(array.begin(), array.end(), reinterpret_cast<T*>(chunk.data()));
@@ -63,10 +67,28 @@ etna::SlangShaderTypedArrayRef<T> slang_shader_ser_write_typed_array(
 
 template <class T>
   requires(sizeof(T) % sizeof(uint64_t) == 0 && alignof(T) <= sizeof(uint64_t))
-etna::SlangShaderTypedRef<T> slang_shader_ser_write_type(
+inline etna::SlangShaderTypedRef<T> slang_shader_ser_write_type(
   const T& obj, SlangShaderSerializationContext& data)
 {
   return slang_shader_ser_write_typed_array<T>({&obj, 1}, data);
+}
+
+inline etna::SlangShaderString slang_shader_ser_write_string(
+  const std::string& str, SlangShaderSerializationContext& data)
+{
+  if (str.empty())
+    return {};
+  etna::SlangShaderString ref = {data.totalBytes(), str.length()};
+  auto& chunk = data.pushChunk(str.length() + 1);
+  memcpy(chunk.data(), str.data(), str.length());
+  chunk[str.length()] = uint8_t('\0');
+  return ref;
+}
+
+inline etna::SlangShaderResolutionPath slang_shader_ser_write_path(
+  const std::string& path, SlangShaderSerializationContext& data)
+{
+  return etna::SlangShaderResolutionPath{slang_shader_ser_write_string(path, data)};
 }
 
 bool slang_shader_ser_write_to_file(

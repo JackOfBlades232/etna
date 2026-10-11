@@ -18,22 +18,31 @@ inline constexpr uint64_t SLANG_DEFAULT_ENTITY_SLOT = 0;
 enum class SlangShaderResourceType : uint64_t
 {
   COMBINED_TEXTURE_SAMPLER,
-  RO_TEXTURE,
+  TEXTURE,
   SAMPLER,
-  RW_TEXTURE,
-  RO_BUFFER,
-  RW_BUFFER,
+  BUFFER,
+};
+
+enum class SlangShaderResourceAccess : uint64_t
+{
+  RW,
+  RO
 };
 
 struct SlangShaderResourceDesc
 {
   SlangShaderResourceType type;
+  SlangShaderResourceAccess access;
+
+  bool operator==(const SlangShaderResourceDesc&) const = default;
 };
 
 struct SlangShaderResourceBinding
 {
   uint64_t binding;
   uint64_t arraySize; // UINT64_MAX -- unbounded
+
+  bool operator==(const SlangShaderResourceBinding&) const = default;
 };
 
 struct SlangShaderBytecodeRef
@@ -101,17 +110,24 @@ struct SlangShaderReflectionHeader
   uint64_t numThreadsZ;
 };
 
+struct SlangShaderModuleRef
+{
+  SlangShaderBytecodeRef bytecode;
+  SlangShaderString entryPoint;
+  uint64_t declaresPushConsts;
+};
+
 struct SlangShaderHeader
 {
   uint64_t magic;
   uint64_t version;
   SlangShaderReflectionHeader refl;
-  SlangShaderBytecodeRef vert;
-  SlangShaderBytecodeRef frag;
-  SlangShaderBytecodeRef tesc;
-  SlangShaderBytecodeRef tese;
-  SlangShaderBytecodeRef geom;
-  SlangShaderBytecodeRef comp;
+  SlangShaderModuleRef vert;
+  SlangShaderModuleRef frag;
+  SlangShaderModuleRef tesc;
+  SlangShaderModuleRef tese;
+  SlangShaderModuleRef geom;
+  SlangShaderModuleRef comp;
 };
 
 inline bool slang_shader_ref_has_value(const auto& ref)

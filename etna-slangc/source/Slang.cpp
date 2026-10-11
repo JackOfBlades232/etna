@@ -108,6 +108,7 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
   std::vector<slang::CompilerOptionEntry> options = {
     {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}},
     {slang::CompilerOptionName::SkipSPIRVValidation, {slang::CompilerOptionValueKind::Int, 0}},
+    {slang::CompilerOptionName::VulkanUseEntryPointName, {slang::CompilerOptionValueKind::Int, 1}},
     {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
   if (ci.emitSpirvDebugInfo)
   {
@@ -187,7 +188,7 @@ static const char* stage_name(SlangStage stage)
     return nullptr;
 }
 
-static SlangShaderBytecodeRef* bytecode_slot(SlangShaderHeader* header, SlangStage stage)
+static SlangShaderModuleRef* module_slot(SlangShaderHeader* header, SlangStage stage)
 {
   assert(header);
   switch (stage)
@@ -336,10 +337,47 @@ static uint64_t array_size_mul(size_t base, size_t mul)
   return base * mul;
 }
 
+// @NOTE: working around https://github.com/shader-slang/slang/issues/13529
+static uint64_t get_total_slang_array_element_count(
+  slang::TypeLayoutReflection* type_layout,
+  slang::ProgramLayout* program_layout,
+  std::string& typedesc)
+{
+  size_t result = 1;
+  auto* type = type_layout->getType();
+  for (;;)
+  {
+    if (!type->isArray())
+      return result;
+
+    const auto c = type->getElementCount((SlangReflection*)program_layout);
+    if (c == SLANG_UNKNOWN_SIZE)
+    {
+      typedesc += "[?]";
+      result = SLANG_UNKNOWN_SIZE;
+    }
+    if (
+      c == SLANG_UNBOUNDED_SIZE ||
+      c == INT32_MAX /* Very weird, but this is what it seems to return */)
+    {
+      typedesc += "[]";
+      result = SLANG_UNBOUNDED_SIZE;
+    }
+    else
+    {
+      typedesc += fmt::format("[{}]", c);
+      if (result != SLANG_UNKNOWN_SIZE && result != SLANG_UNBOUNDED_SIZE)
+        result *= c;
+    }
+    type = type->getElementType();
+  }
+}
+
 static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ConstbufferReflection* cbuf,
+  slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
   size_t arraySize,
@@ -349,6 +387,7 @@ static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ConstbufferReflection* cbuf,
+  slang::ProgramLayout* program,
   slang::TypeLayoutReflection* type,
   AccessPath path,
   size_t arraySize,
@@ -372,31 +411,22 @@ static void compile_dset_element(
     for (int f = 0; f < fieldCount; ++f)
     {
       slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
-      compile_dset_element(refl, dset, cbuf, field, path, arraySize, name);
+      compile_dset_element(refl, dset, cbuf, program, field, path, arraySize, name);
     }
     break;
   }
   case slang::TypeReflection::Kind::Array: {
     // We don't really care about dimensionality here, since etna binding API is flat
-    size_t slangElementCount = type->getTotalArrayElementCount();
+    std::string arrayName = name;
+    size_t slangElementCount = get_total_slang_array_element_count(type, program, arrayName);
     assert(slangElementCount != SLANG_UNKNOWN_SIZE);
-
-    // @BUG: this is a bug of the current slang reflection
-    // This basically makes [0] and [] indiscriminable
-    // We could do gymnastics with parsing spirv as well and inferring
-    // what the type is, but for simplicity let's just consider them
-    // all unsized -- in any case, 0 sized arrays can't de addressed
-    // and they will never make it to codegen
-    if (slangElementCount == 0)
-      slangElementCount = SLANG_UNBOUNDED_SIZE;
-
     uint64_t elementCount =
       slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
-    std::string arrayName = fmt::format("{}[{}]", name, type->getElementCount());
     compile_dset_element(
       refl,
       dset,
       cbuf,
+      program,
       type->getElementTypeLayout(),
       path,
       array_size_mul(arraySize, elementCount),
@@ -406,6 +436,7 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::Matrix:
   case slang::TypeReflection::Kind::Vector:
   case slang::TypeReflection::Kind::Scalar:
+    assert(cbuf);
     break;
   case slang::TypeReflection::Kind::ConstantBuffer: {
     slang::VariableLayoutReflection* implicitVar = type->getContainerVarLayout();
@@ -446,6 +477,7 @@ static void compile_dset_element(
       refl,
       dset,
       nestedCbuf,
+      program,
       innerType,
       {path.leaf, path.leaf, path.deepestParblock},
       arraySize,
@@ -475,10 +507,12 @@ static void compile_dset_element(
     assert(slots == 1);
     assert(arraySize == 1);
 
+    auto offset = calculate_combined_offset({path.leaf, path.leaf, path.leaf});
+    nestedDset.index = offset.dset;
+
     if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
         binds > 0)
     {
-      auto offset = calculate_combined_offset({path.leaf, path.leaf, path.leaf});
       nestedCbuf = &nestedDset.constBuffers.emplace_back();
       nestedCbuf->name = dsetName;
       nestedCbuf->binding = {offset.binding, binds};
@@ -493,6 +527,7 @@ static void compile_dset_element(
       refl,
       nestedDset,
       nestedCbuf,
+      program,
       innerType,
       {path.leaf, path.leaf, path.leaf},
       arraySize,
@@ -503,11 +538,58 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::Resource: {
     auto& res = dset.resources.emplace_back();
     res.name = name;
-    res.desc = {}; // @TODO
+    res.desc = {};
+    res.binding = {calculate_combined_offset(path).binding, arraySize};
+
+    switch (auto shape = type->getResourceShape(); shape & SLANG_RESOURCE_BASE_SHAPE_MASK)
+    {
+    case SLANG_TEXTURE_1D:
+    case SLANG_TEXTURE_2D:
+    case SLANG_TEXTURE_3D:
+    case SLANG_TEXTURE_CUBE:
+      res.desc.type = (shape & SLANG_TEXTURE_COMBINED_FLAG)
+        ? SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER
+        : SlangShaderResourceType::TEXTURE;
+      break;
+
+    case SLANG_STRUCTURED_BUFFER:
+    case SLANG_BYTE_ADDRESS_BUFFER:
+      res.desc.type = SlangShaderResourceType::BUFFER;
+      break;
+
+    case SLANG_ACCELERATION_STRUCTURE:
+      assert(0);
+      break;
+
+    default:
+      assert(0);
+      break;
+    }
+    switch (type->getResourceAccess())
+    {
+    case SLANG_RESOURCE_ACCESS_READ:
+      res.desc.access = SlangShaderResourceAccess::RO;
+      break;
+    case SLANG_RESOURCE_ACCESS_READ_WRITE:
+    case SLANG_RESOURCE_ACCESS_WRITE:
+      res.desc.access = SlangShaderResourceAccess::RW;
+      break;
+
+    default:
+      assert(0);
+      break;
+    }
+    break;
+  }
+
+  case slang::TypeReflection::Kind::SamplerState: {
+    auto& res = dset.resources.emplace_back();
+    res.name = name;
+    res.desc = {SlangShaderResourceType::SAMPLER, SlangShaderResourceAccess::RO};
     res.binding = {calculate_combined_offset(path).binding, arraySize};
     break;
   }
-  case slang::TypeReflection::Kind::SamplerState:
+
   case slang::TypeReflection::Kind::TextureBuffer:
   case slang::TypeReflection::Kind::ShaderStorageBuffer: {
     assert(0);
@@ -524,6 +606,7 @@ static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ConstbufferReflection* cbuf,
+  slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
   size_t arraySize,
@@ -544,10 +627,131 @@ static void compile_dset_element(
     refl,
     dset,
     cbuf,
+    program,
     var->getTypeLayout(),
     {&node, path.deepestCbuf, path.deepestParblock},
     arraySize,
     name.c_str());
+}
+
+static void merge_cbuf_reflection(ConstbufferReflection& combined, const ConstbufferReflection& src)
+{
+  if (src.name.empty() && src.totalByteCount == 0)
+    return;
+  if (combined.name.empty() && combined.totalByteCount == 0)
+  {
+    combined = src;
+    return;
+  }
+  assert(combined.name == src.name);
+  assert(combined.binding == src.binding); // @TODO: laxer constraints for array sizes?
+  // @TODO: is this accurate for push constants? This is what it used to be anyways
+  assert(combined.totalByteCount == src.totalByteCount);
+}
+
+static void merge_res_reflection(ResourceReflection& combined, const ResourceReflection& src)
+{
+  assert(combined.name == src.name);
+  assert(combined.desc == src.desc);
+  assert(combined.binding == src.binding); // @TODO: laxer constraints for array sizes?
+}
+
+static void merge_dset_reflection(
+  DescriptorSetReflection& combined, const DescriptorSetReflection& src)
+{
+  assert(!dset_is_empty(combined) && !dset_is_empty(src));
+  assert(combined.name == src.name);
+  for (const auto& cbuf : src.constBuffers)
+  {
+    bool merged = false;
+    for (auto& combCbuf : combined.constBuffers)
+    {
+      if (combCbuf.binding.binding == cbuf.binding.binding)
+      {
+        merge_cbuf_reflection(combCbuf, cbuf);
+        merged = true;
+      }
+    }
+    if (!merged)
+      combined.constBuffers.push_back(cbuf);
+  }
+  for (const auto& res : src.resources)
+  {
+    bool merged = false;
+    for (auto& combRes : combined.resources)
+    {
+      if (combRes.binding.binding == res.binding.binding)
+      {
+        merge_res_reflection(combRes, res);
+        merged = true;
+      }
+    }
+    if (!merged)
+      combined.resources.push_back(res);
+  }
+}
+
+static void merge_shader_reflection(ShaderReflection& combined, const ShaderReflection& src)
+{
+  for (const auto& dset : src.dsets)
+  {
+    bool merged = false;
+    for (auto& combDset : combined.dsets)
+    {
+      if (combDset.index == dset.index)
+      {
+        merge_dset_reflection(combDset, dset);
+        merged = true;
+      }
+    }
+    if (!merged)
+      combined.dsets.push_back(dset);
+  }
+  merge_cbuf_reflection(combined.pushConsts, src.pushConsts);
+}
+
+static void serialize_shader_reflection(
+  const ShaderReflection& src,
+  SlangShaderReflectionHeader& header,
+  SlangShaderSerializationContext& sctx)
+{
+  std::vector<SlangShaderDescriptorSetReflection> serializedDsets;
+
+  for (const auto& dset : src.dsets)
+  {
+    auto& dst = serializedDsets.emplace_back();
+    dst.name = slang_shader_ser_write_path(dset.name, sctx);
+
+    std::vector<SlangShaderConstbufferReflection> serializedCbufs;
+    for (const auto& cbuf : dset.constBuffers)
+    {
+      auto& dstCbuf = serializedCbufs.emplace_back();
+      dstCbuf.name = slang_shader_ser_write_path(cbuf.name, sctx);
+      dstCbuf.binding = cbuf.binding;
+      dstCbuf.totalByteCount = cbuf.totalByteCount;
+    }
+    dst.constBuffers = slang_shader_ser_write_typed_array(
+      std::span<const SlangShaderConstbufferReflection>{serializedCbufs}, sctx);
+
+    std::vector<SlangShaderResourceReflection> serializedResources;
+    for (const auto& res : dset.resources)
+    {
+      auto& dstRes = serializedResources.emplace_back();
+      dstRes.name = slang_shader_ser_write_path(res.name, sctx);
+      dstRes.desc = res.desc;
+      dstRes.binding = res.binding;
+    }
+    dst.resources = slang_shader_ser_write_typed_array(
+      std::span<const SlangShaderResourceReflection>{serializedResources}, sctx);
+
+    dst.index = dset.index;
+  }
+
+  header.descriptorSets = slang_shader_ser_write_typed_array(
+    std::span<const SlangShaderDescriptorSetReflection>{serializedDsets}, sctx);
+
+  header.pushConstants.name = slang_shader_ser_write_path(src.pushConsts.name, sctx);
+  header.pushConstants.totalByteCount = src.pushConsts.totalByteCount;
 }
 
 int SlangCompiler::compile(
@@ -632,12 +836,12 @@ int SlangCompiler::compile(
     assert(progLayout->getEntryPointCount() == 1);
 
     SlangStage stage = entryPointRefl->getStage();
-    auto* bytecodeDest = bytecode_slot(header, stage);
-    if (!bytecodeDest)
+    auto* moduleDest = module_slot(header, stage);
+    if (!moduleDest)
     {
       return -3;
     }
-    if (slang_shader_ref_has_value(*bytecodeDest))
+    if (slang_shader_ref_has_value(moduleDest->bytecode))
     {
       spdlog::error("Duplicate entry point {} for stage {}", ep, stage_name(stage));
       return -3;
@@ -653,13 +857,19 @@ int SlangCompiler::compile(
       DescriptorSetReflection& globalDset = shaderReflection.dsets.emplace_back();
       globalDset.name = "";
 
-      compile_dset_element(shaderReflection, globalDset, nullptr, globalScope, {}, 1, "");
       compile_dset_element(
-        shaderReflection, globalDset, nullptr, entryPointScope, {}, 1, "$EntryPoint");
+        shaderReflection, globalDset, nullptr, progLayout, globalScope, {}, 1, "");
+      compile_dset_element(
+        shaderReflection, globalDset, nullptr, progLayout, entryPointScope, {}, 1, "$EntryPoint");
 
       std::erase_if(shaderReflection.dsets, dset_is_empty);
 
-      spdlog::info("{} {}", (void*)globalScope, (void*)entryPointScope);
+      if (shaderReflection.pushConsts.totalByteCount > 0)
+        moduleDest->declaresPushConsts = 1;
+      else
+        moduleDest->declaresPushConsts = 0;
+
+      merge_shader_reflection(combinedShaderReflection, shaderReflection);
     }
 
     if (stage == SLANG_STAGE_COMPUTE)
@@ -694,34 +904,43 @@ int SlangCompiler::compile(
       return -3;
     }
 
-    *bytecodeDest = slang_shader_ser_write_bytecode(
+    moduleDest->bytecode = slang_shader_ser_write_bytecode(
       {(const uint8_t*)spirvCode->getBufferPointer(), spirvCode->getBufferSize()}, sctx);
+    moduleDest->entryPoint = slang_shader_ser_write_string(ep, sctx);
   }
 
   if (
-    slang_shader_ref_has_value(header->comp) &&
-    (slang_shader_ref_has_value(header->vert) || slang_shader_ref_has_value(header->frag) ||
-     slang_shader_ref_has_value(header->tesc) || slang_shader_ref_has_value(header->tese) ||
-     slang_shader_ref_has_value(header->geom)))
+    slang_shader_ref_has_value(header->comp.bytecode) &&
+    (slang_shader_ref_has_value(header->vert.bytecode) ||
+     slang_shader_ref_has_value(header->frag.bytecode) ||
+     slang_shader_ref_has_value(header->tesc.bytecode) ||
+     slang_shader_ref_has_value(header->tese.bytecode) ||
+     slang_shader_ref_has_value(header->geom.bytecode)))
   {
     spdlog::error("Can't require both graphics and compute entrypoints");
     return -3;
   }
   if (
-    !slang_shader_ref_has_value(header->vert) &&
-    (slang_shader_ref_has_value(header->frag) || slang_shader_ref_has_value(header->tesc) ||
-     slang_shader_ref_has_value(header->tese) || slang_shader_ref_has_value(header->geom)))
+    !slang_shader_ref_has_value(header->vert.bytecode) &&
+    (slang_shader_ref_has_value(header->frag.bytecode) ||
+     slang_shader_ref_has_value(header->tesc.bytecode) ||
+     slang_shader_ref_has_value(header->tese.bytecode) ||
+     slang_shader_ref_has_value(header->geom.bytecode)))
   {
     spdlog::error("Graphics pipeline missing a vertex shader");
     return -3;
   }
   if (
-    (slang_shader_ref_has_value(header->tesc) || slang_shader_ref_has_value(header->tese)) &&
-    (!slang_shader_ref_has_value(header->tesc) || !slang_shader_ref_has_value(header->tese)))
+    (slang_shader_ref_has_value(header->tesc.bytecode) ||
+     slang_shader_ref_has_value(header->tese.bytecode)) &&
+    (!slang_shader_ref_has_value(header->tesc.bytecode) ||
+     !slang_shader_ref_has_value(header->tese.bytecode)))
   {
     spdlog::error("Tessellation stage requires both hull and domain shaders");
     return -3;
   }
+
+  serialize_shader_reflection(combinedShaderReflection, header->refl, sctx);
 
   std::string error{};
   if (!slang_shader_ser_write_to_file(sctx, dest.c_str(), error))

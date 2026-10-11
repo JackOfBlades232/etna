@@ -119,6 +119,83 @@ void DescriptorSetInfo::parseShader(
   }
 }
 
+static vk::DescriptorType decriptor_type_from_desc(const SlangShaderResourceDesc& desc)
+{
+  switch (desc.type)
+  {
+  case SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER:
+    return vk::DescriptorType::eCombinedImageSampler;
+  case SlangShaderResourceType::TEXTURE:
+    return desc.access == SlangShaderResourceAccess::RO ? vk::DescriptorType::eSampledImage
+                                                        : vk::DescriptorType::eStorageImage;
+  case SlangShaderResourceType::SAMPLER:
+    return vk::DescriptorType::eSampler;
+  case SlangShaderResourceType::BUFFER:
+    return vk::DescriptorType::eStorageBuffer;
+  }
+}
+
+void DescriptorSetInfo::parseReflection(
+  vk::ShaderStageFlags stage_mask,
+  std::span<const SlangShaderConstbufferReflection> cbufs,
+  std::span<const SlangShaderResourceReflection> resources)
+{
+  auto processDynArrayBinding = [this, dynamicArrayBinding = uint32_t(-1)](
+                                  auto& api_bind, auto& api_flags) mutable {
+    if (api_bind.descriptorCount == UINT64_MAX)
+    {
+      if (hasDynDescriptorArray)
+      {
+        ETNA_ASSERT(dynamicArrayBinding != api_bind.binding);
+        ETNA_PANIC(
+          "DescriptorSetInfo: Only one dyn array binding allowed per set, but declared {} and {}",
+          getMaxBinding(),
+          api_bind.binding);
+      }
+
+      api_bind.descriptorCount = get_num_descriptors_in_pool_for_type(api_bind.descriptorType);
+      api_flags |= vk::DescriptorBindingFlagBits::ePartiallyBound |
+        vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+
+      hasDynDescriptorArray = true;
+      dynamicArrayBinding = api_bind.binding;
+    }
+    else if (hasDynDescriptorArray && usedBindingsCap <= api_bind.binding)
+    {
+      ETNA_PANIC(
+        "DescriptorSetInfo: dyn array binding {} must be last in set, but binding {} was declared",
+        getMaxBinding(),
+        api_bind.binding);
+    }
+  };
+
+  for (const auto& cbuf : cbufs)
+  {
+    vk::DescriptorSetLayoutBinding apiBinding{};
+    vk::DescriptorBindingFlags apiFlags{};
+    apiBinding.descriptorCount = cbuf.binding.arraySize;
+    apiBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+    apiBinding.stageFlags = stage_mask;
+    apiBinding.pImmutableSamplers = nullptr;
+    apiBinding.binding = cbuf.binding.binding;
+    processDynArrayBinding(apiBinding, apiFlags);
+    addResource(apiBinding, apiFlags);
+  }
+
+  for (const auto& res : resources)
+  {
+    vk::DescriptorSetLayoutBinding apiBinding{};
+    vk::DescriptorBindingFlags apiFlags{};
+    apiBinding.descriptorCount = res.binding.arraySize;
+    apiBinding.descriptorType = decriptor_type_from_desc(res.desc);
+    apiBinding.stageFlags = stage_mask;
+    apiBinding.pImmutableSamplers = nullptr;
+    apiBinding.binding = res.binding.binding;
+    processDynArrayBinding(apiBinding, apiFlags);
+    addResource(apiBinding, apiFlags);
+  }
+}
+
 void DescriptorSetInfo::merge(const DescriptorSetInfo& info)
 {
   if (hasDynDescriptorArray || info.hasDynDescriptorArray)

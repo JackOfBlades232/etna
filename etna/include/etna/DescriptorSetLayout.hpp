@@ -5,9 +5,11 @@
 #include <array>
 #include <bitset>
 #include <vector>
+#include <span>
 #include <unordered_map>
 
 #include <etna/Vulkan.hpp>
+#include <etna/SlangShaderFormat.hpp>
 
 
 struct SpvReflectDescriptorSet;
@@ -24,6 +26,10 @@ struct DescriptorSetLayoutHash;
 struct DescriptorSetInfo
 {
   void parseShader(vk::ShaderStageFlagBits stage, const SpvReflectDescriptorSet& spv);
+  void parseReflection(
+    vk::ShaderStageFlags stage_mask,
+    std::span<const SlangShaderConstbufferReflection> cbufs,
+    std::span<const SlangShaderResourceReflection> resources);
   void addResource(
     const vk::DescriptorSetLayoutBinding& binding, vk::DescriptorBindingFlags flags = {});
   void merge(const DescriptorSetInfo& info);

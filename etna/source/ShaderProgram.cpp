@@ -309,6 +309,18 @@ void ShaderProgramManager::ShaderProgramInternal::reloadSplit(
   progLayout = unwrap_vk_result(get_context().getDevice().createPipelineLayoutUnique(info));
 }
 
+template <class T>
+static std::span<const T> rebase_ser_array(
+  const SlangShaderTypedArrayRef<T>& ref, const char* blob)
+{
+  return std::span<const T>{(const T*)(blob + ref.byteOffset), ref.elemCount};
+}
+
+static std::string_view rebase_ser_string(const SlangShaderString& ref, const char* blob)
+{
+  return std::string_view{(const char*)(blob + ref.byteOffset), ref.charCount};
+}
+
 void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
   ShaderProgramManager&, CombinedShaderProgramData& combined)
 {
@@ -327,25 +339,20 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
       "Combined shader program {} is malformed: invalid version {}", name, header->version);
   }
 
-  usedDescriptors = {};
-  descriptorIds = {};
-  pushConst = {};
-
-  std::array<DescriptorSetInfo, MAX_PROGRAM_DESCRIPTORS> dstDescriptors;
-  uint32_t usedDescriptorSetRange = 0;
-
   std::vector<vk::ShaderStageFlagBits> stages{};
+  vk::ShaderStageFlags stageMask{};
+  vk::ShaderStageFlags pcStageMask{};
 
   vk::Device device = get_context().getDevice();
   auto& descriptorLayoutCache = get_context().getDescriptorSetLayouts();
 
-  // @TODO: reflection
-
   auto loadModule = [&](
-                      const SlangShaderBytecodeRef& bc,
+                      const SlangShaderModuleRef& mr,
                       vk::ShaderStageFlagBits stage,
                       vk::UniqueShaderModule& vkModule,
                       std::string& entry_point) {
+    const SlangShaderBytecodeRef& bc = mr.bytecode;
+
     if (!slang_shader_ref_has_value(bc))
       return;
 
@@ -360,99 +367,11 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
 
     vkModule = unwrap_vk_result(device.createShaderModuleUnique(info));
     stages.push_back(stage);
+    stageMask |= stage;
+    if (mr.declaresPushConsts)
+      pcStageMask |= stage;
 
-    // @TODO: replace with slang reflection or leave for validation?
-    std::unique_ptr<SpvReflectShaderModule, SpvModDeleter> spvModule;
-    spvModule.reset(new SpvReflectShaderModule{});
-
-    ETNA_SPV_REFLECT_VERIFY(
-      spvReflectCreateShaderModule(code.size(), code.data(), spvModule.get()), combined.path);
-
-    ETNA_VERIFYF(
-      static_cast<vk::ShaderStageFlagBits>(spvModule->shader_stage) == stage,
-      "Combined shader program {} is malformed: shader stage {} holds code from a wrong stage",
-      name,
-      int(stage));
-    entry_point = spvModule->entry_point_name;
-
-    std::vector<std::pair<uint32_t, DescriptorSetInfo>> resources{};
-
-    uint32_t count = 0;
-    ETNA_SPV_REFLECT_VERIFY(
-      spvReflectEnumerateDescriptorSets(spvModule.get(), &count, nullptr), combined.path);
-
-    std::vector<SpvReflectDescriptorSet*> sets(count);
-    ETNA_SPV_REFLECT_VERIFY(
-      spvReflectEnumerateDescriptorSets(spvModule.get(), &count, sets.data()), combined.path);
-
-    resources.reserve(sets.size());
-
-    for (auto pSet : sets)
-    {
-      DescriptorSetInfo dsInfo;
-      dsInfo.clear();
-      dsInfo.parseShader(stage, *pSet);
-      resources.push_back({pSet->set, dsInfo});
-    }
-
-    vk::PushConstantRange modulePushConst{};
-
-    if (spvModule->push_constant_block_count == 1)
-    {
-      auto& blk = spvModule->push_constant_blocks[0];
-      if (blk.offset != 0)
-      {
-        ETNA_PANIC("SPIRV {} parse error: PushConst offset is not zero", combined.path);
-      }
-      modulePushConst.offset = 0u;
-      modulePushConst.size = blk.size;
-      modulePushConst.stageFlags = stage;
-    }
-    else if (spvModule->push_constant_block_count > 1)
-    {
-      ETNA_PANIC(
-        "SPIRV {} parse error: only 1 push_const block per shader supported", combined.path);
-    }
-    else
-    {
-      modulePushConst.size = 0u;
-      modulePushConst.offset = 0u;
-    }
-
-    if (modulePushConst.size > 0u)
-    {
-      if (pushConst.size == 0u)
-      {
-        pushConst = modulePushConst;
-      }
-      else
-      {
-        // @TODO: is this an accurate piece of validation? We both ignore offset and are too strict
-        ETNA_ASSERTF(
-          pushConst.size == modulePushConst.size,
-          "ShaderProgram {}: push constant blocks differ between modules (stages), "
-          "expected {} bytes but got {} bytes",
-          name,
-          pushConst.size,
-          modulePushConst.size);
-        pushConst.stageFlags |= stage;
-      }
-    }
-
-    for (auto& desc : resources)
-    {
-      if (desc.first >= MAX_PROGRAM_DESCRIPTORS)
-        ETNA_PANIC(
-          "ShaderProgram {} : set {} out of max sets ({})",
-          name,
-          desc.first,
-          MAX_PROGRAM_DESCRIPTORS);
-
-      usedDescriptors.set(desc.first);
-      dstDescriptors[desc.first].merge(desc.second);
-
-      usedDescriptorSetRange = std::max(desc.first + 1, usedDescriptorSetRange);
-    }
+    entry_point = rebase_ser_string(mr.entryPoint, data.data());
   };
 
   loadModule(
@@ -475,6 +394,32 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
     header->comp, vk::ShaderStageFlagBits::eCompute, combined.comp, combined.compEntryPoint);
 
   validate_program_shaders(name, stages);
+
+  usedDescriptors = {};
+  descriptorIds = {};
+
+  std::array<DescriptorSetInfo, MAX_PROGRAM_DESCRIPTORS> dstDescriptors;
+  uint32_t usedDescriptorSetRange = 0;
+
+  auto dsets = rebase_ser_array(header->refl.descriptorSets, data.data());
+  for (const auto& dset : dsets)
+  {
+    auto cbufs = rebase_ser_array(dset.constBuffers, data.data());
+    auto resources = rebase_ser_array(dset.resources, data.data());
+
+    DescriptorSetInfo dsInfo;
+    dsInfo.parseReflection(stageMask, cbufs, resources);
+
+    usedDescriptors.set(dset.index);
+    dstDescriptors[dset.index] = dsInfo;
+    usedDescriptorSetRange = std::max(uint32_t(dset.index + 1), usedDescriptorSetRange);
+  }
+
+  pushConst = {};
+  pushConst.size = header->refl.pushConstants.totalByteCount;
+  pushConst.stageFlags = pcStageMask;
+
+  // @TODO: reflection data for builder
 
   constexpr DescriptorSetInfo NULL_DSET_INFO{};
 
