@@ -18,6 +18,7 @@ namespace etna
 {
 
 struct DescriptorSetLayoutCache;
+struct ParameterSetCache;
 struct ShaderProgramManager;
 class PipelineManager;
 struct DynamicDescriptorPool;
@@ -49,6 +50,7 @@ public:
   ShaderProgramManager& getShaderManager();
   PipelineManager& getPipelineManager();
   DescriptorSetLayoutCache& getDescriptorSetLayouts();
+  ParameterSetCache& getParameterSets();
   DynamicDescriptorPool& getDescriptorPool();
   PersistentDescriptorPool& getPersistentDescriptorPool();
   ResourceStates& getResourceTracker();
@@ -80,6 +82,7 @@ private:
   std::unique_ptr<VmaAllocator_T, void (*)(VmaAllocator)> vmaAllocator{nullptr, nullptr};
 
   std::unique_ptr<DescriptorSetLayoutCache> descriptorSetLayouts;
+  std::unique_ptr<ParameterSetCache> parameterSets;
   std::unique_ptr<ShaderProgramManager> shaderPrograms;
   std::unique_ptr<PipelineManager> pipelineManager;
   std::unique_ptr<DynamicDescriptorPool> perFrameDescriptorPool;

@@ -23,7 +23,8 @@ add_library(etna
   "source/PerFrameCmdMgr.cpp"
   "source/OneShotCmdMgr.cpp"
   "source/BlockingTransferHelper.cpp"
-  "source/PerFrameTransferHelper.cpp")
+  "source/PerFrameTransferHelper.cpp"
+  "source/SlangShaderParameters.cpp")
 
 
 target_include_directories(etna PUBLIC include)

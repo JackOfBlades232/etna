@@ -310,8 +310,7 @@ void ShaderProgramManager::ShaderProgramInternal::reloadSplit(
 }
 
 template <class T>
-static std::span<const T> rebase_ser_array(
-  const SlangShaderTypedArrayRef<T>& ref, const char* blob)
+static std::span<const T> rebase_ser_array(const SlangShaderTypedArrayRef<T>& ref, const char* blob)
 {
   return std::span<const T>{(const T*)(blob + ref.byteOffset), ref.elemCount};
 }
@@ -345,6 +344,7 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
 
   vk::Device device = get_context().getDevice();
   auto& descriptorLayoutCache = get_context().getDescriptorSetLayouts();
+  auto& parameterSetCache = get_context().getParameterSets();
 
   auto loadModule = [&](
                       const SlangShaderModuleRef& mr,
@@ -413,6 +413,11 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
     usedDescriptors.set(dset.index);
     dstDescriptors[dset.index] = dsInfo;
     usedDescriptorSetRange = std::max(uint32_t(dset.index + 1), usedDescriptorSetRange);
+
+    parameterSets.emplace_back(
+      std::string{rebase_ser_string(dset.name, data.data())},
+      parameterSetCache.parseRootParameterSet(dset, data.data()),
+      uint32_t(dset.index));
   }
 
   pushConst = {};

@@ -13,6 +13,7 @@
 #include <etna/Vulkan.hpp>
 #include <etna/Forward.hpp>
 #include <etna/DescriptorSetLayout.hpp>
+#include <etna/SlangShaderParameters.hpp>
 
 
 namespace etna
@@ -179,6 +180,15 @@ private:
 
     std::bitset<MAX_PROGRAM_DESCRIPTORS> usedDescriptors;
     std::array<DescriptorLayoutId, MAX_PROGRAM_DESCRIPTORS> descriptorIds;
+
+    // @TODO: better DS
+    struct ParameterSetRef
+    {
+      std::string name;
+      ParameterSetId psetId; 
+      uint32_t dsetIndex; 
+    };
+    std::vector<ParameterSetRef> parameterSets;
 
     vk::PushConstantRange pushConst{};
     vk::UniquePipelineLayout progLayout;

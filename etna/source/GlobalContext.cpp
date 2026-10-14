@@ -6,6 +6,7 @@
 
 #include <etna/Etna.hpp>
 #include <etna/DescriptorSetLayout.hpp>
+#include <etna/SlangShaderParameters.hpp>
 #include <etna/ShaderProgram.hpp>
 #include <etna/PipelineManager.hpp>
 #include <etna/DescriptorSet.hpp>
@@ -374,6 +375,7 @@ GlobalContext::GlobalContext(const InitParams& params)
   }
 
   descriptorSetLayouts = std::make_unique<DescriptorSetLayoutCache>();
+  parameterSets = std::make_unique<ParameterSetCache>();
   shaderPrograms = std::make_unique<ShaderProgramManager>();
   pipelineManager = std::make_unique<PipelineManager>(vkDevice.get(), *shaderPrograms);
   perFrameDescriptorPool = std::make_unique<DynamicDescriptorPool>(vkDevice.get(), mainWorkStream);
@@ -475,6 +477,11 @@ PipelineManager& GlobalContext::getPipelineManager()
 DescriptorSetLayoutCache& GlobalContext::getDescriptorSetLayouts()
 {
   return *descriptorSetLayouts;
+}
+
+ParameterSetCache& GlobalContext::getParameterSets()
+{
+  return *parameterSets;
 }
 
 DynamicDescriptorPool& GlobalContext::getDescriptorPool()
