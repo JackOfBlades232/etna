@@ -44,7 +44,10 @@ struct ParameterSetCache
   std::unordered_map<std::string, ParameterSetId> rootParameterSets;
 
   ParameterSetId parseRootParameterSet(
-    const SlangShaderDescriptorSetReflection& refl, const char* blob);
+    const SlangShaderDescriptorSetReflection& dset,
+    const char* blob,
+    ParameterSetId remapped_typeid);
+  std::vector<ParameterSetId> addTypes(const SlangShaderReflectionHeader& refl, const char* blob);
 };
 
 

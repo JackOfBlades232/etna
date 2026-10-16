@@ -249,16 +249,41 @@ struct DescriptorSetReflection
   std::string name;
   std::vector<ResourceReflection> resources;
   uint64_t index;
+  uint64_t typeId = UINT64_MAX;
 };
 
 struct PushConstantsReflection : ResourceReflection
 {
 };
 
+struct FieldReflection
+{
+  std::string name;
+  uint64_t resourceOffset = UINT64_MAX;
+  uint64_t subtypeId = UINT64_MAX;
+  std::vector<uint64_t> arrayDims;
+
+  bool operator==(const FieldReflection&) const = default;
+};
+
+struct TypeReflection
+{
+  std::vector<FieldReflection> fields;
+
+  bool operator==(const TypeReflection&) const = default;
+};
+
+struct TypeDb
+{
+  std::vector<TypeReflection> types;
+  std::vector<size_t> typeHashes;
+};
+
 struct ShaderReflection
 {
   std::vector<DescriptorSetReflection> dsets;
   PushConstantsReflection pushConsts;
+  TypeDb typeDb;
 };
 
 struct AccessPathNode
@@ -280,6 +305,41 @@ struct CombinedOffset
   uint32_t binding;
   uint32_t byteOffset;
 };
+
+template <class T>
+static void hash_combine(size_t& seed, const T& v)
+{
+  std::hash<T> hasher;
+  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+static uint64_t add_type(TypeReflection&& type, TypeDb& db)
+{
+  size_t hash = 0;
+  for (const auto& f : type.fields)
+  {
+    hash_combine(hash, f.name);
+    hash_combine(hash, f.resourceOffset);
+    hash_combine(hash, f.subtypeId);
+    hash_combine(hash, f.arrayDims.size());
+    for (uint64_t dim : f.arrayDims)
+      hash_combine(hash, dim);
+  }
+
+  for (size_t i = 0; i < db.types.size(); ++i)
+  {
+    if (db.typeHashes[i] == hash && db.types[i] == type)
+    {
+      TypeReflection localDestruction{std::move(type)};
+      return uint64_t(i);
+    }
+  }
+
+  auto id = uint64_t(db.types.size());
+  db.types.emplace_back() = std::move(type);
+  db.typeHashes.emplace_back() = hash;
+  return id;
+}
 
 static CombinedOffset calculate_combined_offset(AccessPath path)
 {
@@ -333,7 +393,8 @@ static uint64_t array_size_mul(size_t base, size_t mul)
 static uint64_t get_total_slang_array_element_count(
   slang::TypeLayoutReflection* type_layout,
   slang::ProgramLayout* program_layout,
-  std::string& typedesc)
+  std::string& typedesc,
+  FieldReflection* field)
 {
   size_t result = 1;
   auto* type = type_layout->getType();
@@ -346,6 +407,8 @@ static uint64_t get_total_slang_array_element_count(
     if (c == SLANG_UNKNOWN_SIZE)
     {
       typedesc += "[?]";
+      if (field)
+        field->arrayDims.push_back(UINT64_MAX - 1);
       result = SLANG_UNKNOWN_SIZE;
     }
     if (
@@ -353,11 +416,15 @@ static uint64_t get_total_slang_array_element_count(
       c == INT32_MAX /* Very weird, but this is what it seems to return */)
     {
       typedesc += "[]";
+      if (field)
+        field->arrayDims.push_back(UINT64_MAX);
       result = SLANG_UNBOUNDED_SIZE;
     }
     else
     {
       typedesc += fmt::format("[{}]", c);
+      if (field)
+        field->arrayDims.push_back(c);
       if (result != SLANG_UNKNOWN_SIZE && result != SLANG_UNBOUNDED_SIZE)
         result *= c;
     }
@@ -369,6 +436,8 @@ static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
+  FieldReflection* field,
+  uint64_t* current_field_offset,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -379,6 +448,8 @@ static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
+  FieldReflection* field,
+  uint64_t* current_field_offset,
   slang::ProgramLayout* program,
   slang::TypeLayoutReflection* type,
   AccessPath path,
@@ -396,21 +467,52 @@ static void compile_dset_element(
   {
     return;
   }
+  bool hasResources = type->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0;
   switch (typeKind)
   {
   case slang::TypeReflection::Kind::Struct: {
     int fieldCount = type->getFieldCount();
+    std::optional<TypeReflection> typeRefl{};
+    if (hasResources)
+      typeRefl.emplace();
+    uint64_t innerOffset = 0;
     for (int f = 0; f < fieldCount; ++f)
     {
-      slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
-      compile_dset_element(refl, dset, cbuf, program, field, path, arraySize, name);
+      slang::VariableLayoutReflection* fv = type->getFieldByIndex(f);
+      slang::TypeLayoutReflection* ft = fv->getTypeLayout();
+      auto* nfield = hasResources && ft->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0
+        ? &typeRefl->fields.emplace_back()
+        : nullptr;
+      auto* noff = nfield ? &innerOffset : nullptr;
+      compile_dset_element(refl, dset, cbuf, nfield, noff, program, fv, path, arraySize, name);
+    }
+    if (typeRefl)
+    {
+      uint64_t& idDest = field ? field->subtypeId : dset.typeId;
+      assert(idDest == UINT64_MAX);
+      idDest = add_type(std::move(*typeRefl), refl.typeDb);
+      if (current_field_offset)
+      {
+        field->resourceOffset = *current_field_offset;
+        *current_field_offset += innerOffset;
+      }
     }
     break;
   }
   case slang::TypeReflection::Kind::Array: {
     // We don't really care about dimensionality here, since etna binding API is flat
     std::string arrayName = name;
-    size_t slangElementCount = get_total_slang_array_element_count(type, program, arrayName);
+
+    FieldReflection* nfield = nullptr;
+    uint64_t* noff = nullptr;
+    if (type->getElementTypeLayout()->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0)
+    {
+      nfield = field;
+      noff = current_field_offset;
+    }
+
+    size_t slangElementCount =
+      get_total_slang_array_element_count(type, program, arrayName, nfield);
     assert(slangElementCount != SLANG_UNKNOWN_SIZE);
     uint64_t elementCount =
       slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
@@ -418,6 +520,8 @@ static void compile_dset_element(
       refl,
       dset,
       cbuf,
+      nfield,
+      noff,
       program,
       type->getElementTypeLayout(),
       path,
@@ -472,6 +576,8 @@ static void compile_dset_element(
       refl,
       dset,
       nestedCbuf,
+      field,
+      current_field_offset,
       program,
       innerType,
       {path.leaf, path.leaf, path.deepestParblock},
@@ -524,6 +630,8 @@ static void compile_dset_element(
       refl,
       nestedDset,
       nestedCbuf,
+      field,
+      current_field_offset,
       program,
       innerType,
       {path.leaf, path.leaf, path.leaf},
@@ -533,6 +641,11 @@ static void compile_dset_element(
     break;
   }
   case slang::TypeReflection::Kind::Resource: {
+    assert(field);
+    field->resourceOffset = *current_field_offset;
+    field->subtypeId = UINT64_MAX;
+    ++(*current_field_offset);
+
     auto& res = dset.resources.emplace_back();
     res.name = name;
     res.desc = {};
@@ -580,6 +693,11 @@ static void compile_dset_element(
   }
 
   case slang::TypeReflection::Kind::SamplerState: {
+    assert(field);
+    field->resourceOffset = *current_field_offset;
+    field->subtypeId = UINT64_MAX;
+    ++(*current_field_offset);
+
     auto& res = dset.resources.emplace_back();
     res.name = name;
     res.desc = {SlangShaderResourceType::SAMPLER, SlangShaderResourceAccess::RO, 0};
@@ -603,6 +721,8 @@ static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
+  FieldReflection* field,
+  uint64_t* current_field_offset,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -624,6 +744,8 @@ static void compile_dset_element(
     refl,
     dset,
     cbuf,
+    field,
+    current_field_offset,
     program,
     var->getTypeLayout(),
     {&node, path.deepestCbuf, path.deepestParblock},
@@ -695,13 +817,14 @@ static void serialize_shader_reflection(
   for (const auto& dset : src.dsets)
   {
     auto& dst = serializedDsets.emplace_back();
-    dst.name = slang_shader_ser_write_path(dset.name, sctx);
+    dst.name = slang_shader_ser_write_string(dset.name, sctx);
 
     std::vector<SlangShaderResourceReflection> serializedResources;
+    serializedResources.emplace_back(); // Id 0
     for (const auto& res : dset.resources)
     {
       auto& dstRes = serializedResources.emplace_back();
-      dstRes.name = slang_shader_ser_write_path(res.name, sctx);
+      dstRes.name = slang_shader_ser_write_string(res.name, sctx);
       dstRes.desc = res.desc;
       dstRes.binding = res.binding;
     }
@@ -714,7 +837,7 @@ static void serialize_shader_reflection(
   header.descriptorSets = slang_shader_ser_write_typed_array(
     std::span<const SlangShaderDescriptorSetReflection>{serializedDsets}, sctx);
 
-  header.pushConstants.name = slang_shader_ser_write_path(src.pushConsts.name, sctx);
+  header.pushConstants.name = slang_shader_ser_write_string(src.pushConsts.name, sctx);
   header.pushConstants.totalByteCount = src.pushConsts.desc.cbufTotalByteCount;
 }
 
@@ -822,9 +945,27 @@ int SlangCompiler::compile(
       globalDset.name = "";
 
       compile_dset_element(
-        shaderReflection, globalDset, nullptr, progLayout, globalScope, {}, 1, "");
+        shaderReflection,
+        globalDset,
+        nullptr,
+        nullptr,
+        nullptr,
+        progLayout,
+        globalScope,
+        {},
+        1,
+        "");
       compile_dset_element(
-        shaderReflection, globalDset, nullptr, progLayout, entryPointScope, {}, 1, "$EntryPoint");
+        shaderReflection,
+        globalDset,
+        nullptr,
+        nullptr,
+        nullptr,
+        progLayout,
+        entryPointScope,
+        {},
+        1,
+        "$EntryPoint");
 
       std::erase_if(shaderReflection.dsets, dset_is_empty);
 

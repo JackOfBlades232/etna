@@ -169,7 +169,7 @@ void DescriptorSetInfo::parseReflection(
     }
   };
 
-  for (const auto& res : resources)
+  for (const auto& res : resources.subspan(1))
   {
     vk::DescriptorSetLayoutBinding apiBinding{};
     vk::DescriptorBindingFlags apiFlags{};

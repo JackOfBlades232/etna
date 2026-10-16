@@ -85,12 +85,6 @@ inline etna::SlangShaderString slang_shader_ser_write_string(
   return ref;
 }
 
-inline etna::SlangShaderResolutionPath slang_shader_ser_write_path(
-  const std::string& path, SlangShaderSerializationContext& data)
-{
-  return etna::SlangShaderResolutionPath{slang_shader_ser_write_string(path, data)};
-}
-
 bool slang_shader_ser_write_to_file(
   const SlangShaderSerializationContext& data, std::filesystem::path dest, std::string& error);
 
