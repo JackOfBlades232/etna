@@ -28,7 +28,6 @@ struct DescriptorSetInfo
   void parseShader(vk::ShaderStageFlagBits stage, const SpvReflectDescriptorSet& spv);
   void parseReflection(
     vk::ShaderStageFlags stage_mask,
-    std::span<const SlangShaderConstbufferReflection> cbufs,
     std::span<const SlangShaderResourceReflection> resources);
   void addResource(
     const vk::DescriptorSetLayoutBinding& binding, vk::DescriptorBindingFlags flags = {});

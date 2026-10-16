@@ -21,6 +21,7 @@ enum class SlangShaderResourceType : uint64_t
   TEXTURE,
   SAMPLER,
   BUFFER,
+  CONSTBUFFER
 };
 
 enum class SlangShaderResourceAccess : uint64_t
@@ -33,6 +34,7 @@ struct SlangShaderResourceDesc
 {
   SlangShaderResourceType type;
   SlangShaderResourceAccess access;
+  uint64_t cbufTotalByteCount;
 
   bool operator==(const SlangShaderResourceDesc&) const = default;
 };
@@ -73,13 +75,6 @@ struct SlangShaderResolutionPath : SlangShaderString
 {
 };
 
-struct SlangShaderConstbufferReflection
-{
-  SlangShaderResolutionPath name;
-  SlangShaderResourceBinding binding;
-  uint64_t totalByteCount;
-};
-
 struct SlangShaderResourceReflection
 {
   SlangShaderResolutionPath name;
@@ -90,7 +85,6 @@ struct SlangShaderResourceReflection
 struct SlangShaderDescriptorSetReflection
 {
   SlangShaderResolutionPath name;
-  SlangShaderTypedArrayRef<SlangShaderConstbufferReflection> constBuffers;
   SlangShaderTypedArrayRef<SlangShaderResourceReflection> resources;
   uint64_t index;
 };

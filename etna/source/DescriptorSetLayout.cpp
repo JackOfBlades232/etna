@@ -132,13 +132,13 @@ static vk::DescriptorType decriptor_type_from_desc(const SlangShaderResourceDesc
     return vk::DescriptorType::eSampler;
   case SlangShaderResourceType::BUFFER:
     return vk::DescriptorType::eStorageBuffer;
+  case SlangShaderResourceType::CONSTBUFFER:
+    return vk::DescriptorType::eUniformBuffer;
   }
 }
 
 void DescriptorSetInfo::parseReflection(
-  vk::ShaderStageFlags stage_mask,
-  std::span<const SlangShaderConstbufferReflection> cbufs,
-  std::span<const SlangShaderResourceReflection> resources)
+  vk::ShaderStageFlags stage_mask, std::span<const SlangShaderResourceReflection> resources)
 {
   auto processDynArrayBinding = [this, dynamicArrayBinding = uint32_t(-1)](
                                   auto& api_bind, auto& api_flags) mutable {
@@ -168,19 +168,6 @@ void DescriptorSetInfo::parseReflection(
         api_bind.binding);
     }
   };
-
-  for (const auto& cbuf : cbufs)
-  {
-    vk::DescriptorSetLayoutBinding apiBinding{};
-    vk::DescriptorBindingFlags apiFlags{};
-    apiBinding.descriptorCount = cbuf.binding.arraySize;
-    apiBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
-    apiBinding.stageFlags = stage_mask;
-    apiBinding.pImmutableSamplers = nullptr;
-    apiBinding.binding = cbuf.binding.binding;
-    processDynArrayBinding(apiBinding, apiFlags);
-    addResource(apiBinding, apiFlags);
-  }
 
   for (const auto& res : resources)
   {

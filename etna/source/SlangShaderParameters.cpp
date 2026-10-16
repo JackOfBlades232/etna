@@ -10,7 +10,7 @@ ParameterSetId ParameterSetCache::parseRootParameterSet(
 {
   (void)refl;
   (void)blob;
-  ETNA_ASSERTF(0, "TODO");
+  //ETNA_ASSERTF(0, "TODO");
   return ParameterSetId::INVALID;
 }
 

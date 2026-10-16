@@ -237,13 +237,6 @@ static Slang::ComPtr<slang::IEntryPoint> find_entry_point_in_session(
 // @TODO: come up with a way to remove duplication or nah?
 static constexpr size_t PREALLOC_COUNT = 512; // Imposed max for pointer stability
 
-struct ConstbufferReflection
-{
-  std::string name;
-  SlangShaderResourceBinding binding;
-  uint64_t totalByteCount;
-};
-
 struct ResourceReflection
 {
   std::string name;
@@ -254,12 +247,11 @@ struct ResourceReflection
 struct DescriptorSetReflection
 {
   std::string name;
-  std::vector<ConstbufferReflection> constBuffers;
   std::vector<ResourceReflection> resources;
   uint64_t index;
 };
 
-struct PushConstantsReflection : ConstbufferReflection
+struct PushConstantsReflection : ResourceReflection
 {
 };
 
@@ -325,7 +317,7 @@ static CombinedOffset calculate_combined_offset(AccessPath path)
 
 static bool dset_is_empty(const DescriptorSetReflection& dset)
 {
-  return dset.constBuffers.empty() && dset.resources.empty();
+  return dset.resources.empty();
 }
 
 static uint64_t array_size_mul(size_t base, size_t mul)
@@ -376,7 +368,7 @@ static uint64_t get_total_slang_array_element_count(
 static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
-  ConstbufferReflection* cbuf,
+  ResourceReflection* cbuf,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -386,7 +378,7 @@ static void compile_dset_element(
 static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
-  ConstbufferReflection* cbuf,
+  ResourceReflection* cbuf,
   slang::ProgramLayout* program,
   slang::TypeLayoutReflection* type,
   AccessPath path,
@@ -442,31 +434,34 @@ static void compile_dset_element(
     slang::VariableLayoutReflection* implicitVar = type->getContainerVarLayout();
     slang::TypeLayoutReflection* innerType = type->getElementTypeLayout();
 
-    ConstbufferReflection* nestedCbuf = nullptr;
+    ResourceReflection* nestedCbuf = nullptr;
 
     slang::TypeLayoutReflection* implicitVarType = implicitVar->getTypeLayout();
     if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
         binds > 0)
     {
       auto offset = calculate_combined_offset({path.leaf, path.leaf, path.deepestParblock});
-      assert(dset.constBuffers.size() < PREALLOC_COUNT);
-      nestedCbuf = &dset.constBuffers.emplace_back();
+      assert(dset.resources.size() < PREALLOC_COUNT);
+      nestedCbuf = &dset.resources.emplace_back();
       nestedCbuf->name = name;
       nestedCbuf->binding = {offset.binding, array_size_mul(binds, arraySize)};
-      nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      nestedCbuf->desc.type = SlangShaderResourceType::CONSTBUFFER;
+      nestedCbuf->desc.access = SlangShaderResourceAccess::RO;
+      nestedCbuf->desc.cbufTotalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       assert(binds == 1);
-      assert(nestedCbuf->totalByteCount > 0);
+      assert(nestedCbuf->desc.cbufTotalByteCount > 0);
     }
     else if (auto binds = implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer);
              binds > 0)
     {
-      assert(refl.pushConsts.totalByteCount == 0);
+      assert(refl.pushConsts.desc.cbufTotalByteCount == 0);
       refl.pushConsts.name = name;
-      refl.pushConsts.totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      refl.pushConsts.desc.cbufTotalByteCount =
+        innerType->getStride(slang::ParameterCategory::Uniform);
       nestedCbuf = &refl.pushConsts;
       assert(binds == 1);
       assert(arraySize == 1);
-      assert(nestedCbuf->totalByteCount > 0);
+      assert(nestedCbuf->desc.cbufTotalByteCount > 0);
     }
     else
     {
@@ -491,7 +486,7 @@ static void compile_dset_element(
 
     assert(refl.dsets.size() < PREALLOC_COUNT);
     DescriptorSetReflection& nestedDset = refl.dsets.emplace_back();
-    ConstbufferReflection* nestedCbuf = nullptr;
+    ResourceReflection* nestedCbuf = nullptr;
 
     // Dsets are root names even when inside implicit ones
     const char* dsetName = strrchr(name, ':');
@@ -513,12 +508,14 @@ static void compile_dset_element(
     if (auto binds = implicitVarType->getSize(slang::ParameterCategory::DescriptorTableSlot);
         binds > 0)
     {
-      nestedCbuf = &nestedDset.constBuffers.emplace_back();
+      nestedCbuf = &nestedDset.resources.emplace_back();
       nestedCbuf->name = dsetName;
       nestedCbuf->binding = {offset.binding, binds};
-      nestedCbuf->totalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
+      nestedCbuf->desc.type = SlangShaderResourceType::CONSTBUFFER;
+      nestedCbuf->desc.access = SlangShaderResourceAccess::RO;
+      nestedCbuf->desc.cbufTotalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       assert(binds == 1);
-      assert(nestedCbuf->totalByteCount > 0);
+      assert(nestedCbuf->desc.cbufTotalByteCount > 0);
     }
 
     assert(implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer) == 0);
@@ -585,7 +582,7 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::SamplerState: {
     auto& res = dset.resources.emplace_back();
     res.name = name;
-    res.desc = {SlangShaderResourceType::SAMPLER, SlangShaderResourceAccess::RO};
+    res.desc = {SlangShaderResourceType::SAMPLER, SlangShaderResourceAccess::RO, 0};
     res.binding = {calculate_combined_offset(path).binding, arraySize};
     break;
   }
@@ -605,7 +602,7 @@ static void compile_dset_element(
 static void compile_dset_element(
   ShaderReflection& refl,
   DescriptorSetReflection& dset,
-  ConstbufferReflection* cbuf,
+  ResourceReflection* cbuf,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -634,23 +631,15 @@ static void compile_dset_element(
     name.c_str());
 }
 
-static void merge_cbuf_reflection(ConstbufferReflection& combined, const ConstbufferReflection& src)
+static void merge_res_reflection(ResourceReflection& combined, const ResourceReflection& src)
 {
-  if (src.name.empty() && src.totalByteCount == 0)
+  if (src.name.empty())
     return;
-  if (combined.name.empty() && combined.totalByteCount == 0)
+  if (combined.name.empty())
   {
     combined = src;
     return;
   }
-  assert(combined.name == src.name);
-  assert(combined.binding == src.binding); // @TODO: laxer constraints for array sizes?
-  // @TODO: is this accurate for push constants? This is what it used to be anyways
-  assert(combined.totalByteCount == src.totalByteCount);
-}
-
-static void merge_res_reflection(ResourceReflection& combined, const ResourceReflection& src)
-{
   assert(combined.name == src.name);
   assert(combined.desc == src.desc);
   assert(combined.binding == src.binding); // @TODO: laxer constraints for array sizes?
@@ -661,20 +650,6 @@ static void merge_dset_reflection(
 {
   assert(!dset_is_empty(combined) && !dset_is_empty(src));
   assert(combined.name == src.name);
-  for (const auto& cbuf : src.constBuffers)
-  {
-    bool merged = false;
-    for (auto& combCbuf : combined.constBuffers)
-    {
-      if (combCbuf.binding.binding == cbuf.binding.binding)
-      {
-        merge_cbuf_reflection(combCbuf, cbuf);
-        merged = true;
-      }
-    }
-    if (!merged)
-      combined.constBuffers.push_back(cbuf);
-  }
   for (const auto& res : src.resources)
   {
     bool merged = false;
@@ -707,7 +682,7 @@ static void merge_shader_reflection(ShaderReflection& combined, const ShaderRefl
     if (!merged)
       combined.dsets.push_back(dset);
   }
-  merge_cbuf_reflection(combined.pushConsts, src.pushConsts);
+  merge_res_reflection(combined.pushConsts, src.pushConsts);
 }
 
 static void serialize_shader_reflection(
@@ -721,17 +696,6 @@ static void serialize_shader_reflection(
   {
     auto& dst = serializedDsets.emplace_back();
     dst.name = slang_shader_ser_write_path(dset.name, sctx);
-
-    std::vector<SlangShaderConstbufferReflection> serializedCbufs;
-    for (const auto& cbuf : dset.constBuffers)
-    {
-      auto& dstCbuf = serializedCbufs.emplace_back();
-      dstCbuf.name = slang_shader_ser_write_path(cbuf.name, sctx);
-      dstCbuf.binding = cbuf.binding;
-      dstCbuf.totalByteCount = cbuf.totalByteCount;
-    }
-    dst.constBuffers = slang_shader_ser_write_typed_array(
-      std::span<const SlangShaderConstbufferReflection>{serializedCbufs}, sctx);
 
     std::vector<SlangShaderResourceReflection> serializedResources;
     for (const auto& res : dset.resources)
@@ -751,7 +715,7 @@ static void serialize_shader_reflection(
     std::span<const SlangShaderDescriptorSetReflection>{serializedDsets}, sctx);
 
   header.pushConstants.name = slang_shader_ser_write_path(src.pushConsts.name, sctx);
-  header.pushConstants.totalByteCount = src.pushConsts.totalByteCount;
+  header.pushConstants.totalByteCount = src.pushConsts.desc.cbufTotalByteCount;
 }
 
 int SlangCompiler::compile(
@@ -864,7 +828,7 @@ int SlangCompiler::compile(
 
       std::erase_if(shaderReflection.dsets, dset_is_empty);
 
-      if (shaderReflection.pushConsts.totalByteCount > 0)
+      if (shaderReflection.pushConsts.desc.cbufTotalByteCount > 0)
         moduleDest->declaresPushConsts = 1;
       else
         moduleDest->declaresPushConsts = 0;

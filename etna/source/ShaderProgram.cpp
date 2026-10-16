@@ -404,11 +404,10 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
   auto dsets = rebase_ser_array(header->refl.descriptorSets, data.data());
   for (const auto& dset : dsets)
   {
-    auto cbufs = rebase_ser_array(dset.constBuffers, data.data());
     auto resources = rebase_ser_array(dset.resources, data.data());
 
     DescriptorSetInfo dsInfo;
-    dsInfo.parseReflection(stageMask, cbufs, resources);
+    dsInfo.parseReflection(stageMask, resources);
 
     usedDescriptors.set(dset.index);
     dstDescriptors[dset.index] = dsInfo;
