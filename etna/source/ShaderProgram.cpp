@@ -395,7 +395,7 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
 
   validate_program_shaders(name, stages);
 
-  auto typeRemap = parameterSetCache.addTypes(header->refl, data.data());
+  auto typeRemap = parameterSetCache.addTypes(header->refl.typeDb, data.data());
 
   usedDescriptors = {};
   descriptorIds = {};
@@ -417,15 +417,13 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
 
     parameterSets.emplace_back(
       std::string{rebase_ser_string(dset.name, data.data())},
-      parameterSetCache.parseRootParameterSet(dset, data.data(), typeRemap[dset.typeId]),
+      parameterSetCache.parseRootParameterSet(dset, data.data(), typeRemap),
       uint32_t(dset.index));
   }
 
   pushConst = {};
   pushConst.size = header->refl.pushConstants.totalByteCount;
   pushConst.stageFlags = pcStageMask;
-
-  // @TODO: reflection data for builder
 
   constexpr DescriptorSetInfo NULL_DSET_INFO{};
 

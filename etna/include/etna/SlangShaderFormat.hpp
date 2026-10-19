@@ -105,11 +105,17 @@ struct SlangShaderTypeReflection
   SlangShaderTypedArrayRef<SlangShaderTypeFieldReflection> fields;
 };
 
+struct SlangShaderTypeDatabase
+{
+  SlangShaderTypedArrayRef<SlangShaderTypeReflection> types;
+  SlangShaderTypedArrayRef<uint64_t> typeHashes;
+};
+
 struct SlangShaderReflectionHeader
 {
-  SlangShaderTypedArrayRef<SlangShaderTypeReflection> typeDb;
   SlangShaderTypedArrayRef<SlangShaderDescriptorSetReflection> descriptorSets;
   SlangShaderPushConstantsReflection pushConstants;
+  SlangShaderTypeDatabase typeDb;
   uint64_t numThreadsX;
   uint64_t numThreadsY;
   uint64_t numThreadsZ;

@@ -283,7 +283,6 @@ struct ShaderReflection
 {
   std::vector<DescriptorSetReflection> dsets;
   PushConstantsReflection pushConsts;
-  TypeDb typeDb;
 };
 
 struct AccessPathNode
@@ -434,6 +433,7 @@ static uint64_t get_total_slang_array_element_count(
 
 static void compile_dset_element(
   ShaderReflection& refl,
+  TypeDb& type_db,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
   FieldReflection* field,
@@ -447,6 +447,7 @@ static void compile_dset_element(
 
 static void compile_dset_element(
   ShaderReflection& refl,
+  TypeDb& type_db,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
   FieldReflection* field,
@@ -495,13 +496,13 @@ static void compile_dset_element(
         : nullptr;
       auto* noff = nfield ? &innerOffset : nullptr;
       compile_dset_element(
-        refl, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, name);
+        refl, type_db, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, name);
     }
     if (typeRefl)
     {
       uint64_t& idDest = field ? field->subtypeId : dset.typeId;
       assert(idDest == UINT64_MAX);
-      idDest = add_type(std::move(*typeRefl), refl.typeDb);
+      idDest = add_type(std::move(*typeRefl), type_db);
       if (current_field_offset)
       {
         field->resourceOffset = *current_field_offset;
@@ -529,6 +530,7 @@ static void compile_dset_element(
       slangElementCount == SLANG_UNBOUNDED_SIZE ? UINT64_MAX : slangElementCount;
     compile_dset_element(
       refl,
+      type_db,
       dset,
       cbuf,
       nfield,
@@ -602,6 +604,7 @@ static void compile_dset_element(
 
     compile_dset_element(
       refl,
+      type_db,
       dset,
       nestedCbuf,
       field,
@@ -658,6 +661,7 @@ static void compile_dset_element(
 
     compile_dset_element(
       refl,
+      type_db,
       nestedDset,
       nestedCbuf,
       field,
@@ -753,6 +757,7 @@ static void compile_dset_element(
 
 static void compile_dset_element(
   ShaderReflection& refl,
+  TypeDb& type_db,
   DescriptorSetReflection& dset,
   ResourceReflection* cbuf,
   FieldReflection* field,
@@ -777,6 +782,7 @@ static void compile_dset_element(
   AccessPathNode node{var, path.leaf};
   compile_dset_element(
     refl,
+    type_db,
     dset,
     cbuf,
     field,
@@ -846,36 +852,68 @@ static void merge_shader_reflection(ShaderReflection& combined, const ShaderRefl
 
 static void serialize_shader_reflection(
   const ShaderReflection& src,
+  const TypeDb& type_db,
   SlangShaderReflectionHeader& header,
   SlangShaderSerializationContext& sctx)
 {
-  std::vector<SlangShaderDescriptorSetReflection> serializedDsets;
-
-  for (const auto& dset : src.dsets)
   {
-    auto& dst = serializedDsets.emplace_back();
-    dst.name = slang_shader_ser_write_string(dset.name, sctx);
+    std::vector<SlangShaderDescriptorSetReflection> serializedDsets;
 
-    std::vector<SlangShaderResourceReflection> serializedResources;
-    serializedResources.emplace_back(); // Id 0
-    for (const auto& res : dset.resources)
+    for (const auto& dset : src.dsets)
     {
-      auto& dstRes = serializedResources.emplace_back();
-      dstRes.name = slang_shader_ser_write_string(res.name, sctx);
-      dstRes.desc = res.desc;
-      dstRes.binding = res.binding;
+      auto& dst = serializedDsets.emplace_back();
+      dst.name = slang_shader_ser_write_string(dset.name, sctx);
+
+      std::vector<SlangShaderResourceReflection> serializedResources;
+      for (const auto& res : dset.resources)
+      {
+        auto& dstRes = serializedResources.emplace_back();
+        dstRes.name = slang_shader_ser_write_string(res.name, sctx);
+        dstRes.desc = res.desc;
+        dstRes.binding = res.binding;
+      }
+      dst.resources = slang_shader_ser_write_typed_array(
+        std::span<const SlangShaderResourceReflection>{serializedResources}, sctx);
+
+      dst.index = dset.index;
     }
-    dst.resources = slang_shader_ser_write_typed_array(
-      std::span<const SlangShaderResourceReflection>{serializedResources}, sctx);
 
-    dst.index = dset.index;
+    header.descriptorSets = slang_shader_ser_write_typed_array(
+      std::span<const SlangShaderDescriptorSetReflection>{serializedDsets}, sctx);
   }
-
-  header.descriptorSets = slang_shader_ser_write_typed_array(
-    std::span<const SlangShaderDescriptorSetReflection>{serializedDsets}, sctx);
 
   header.pushConstants.name = slang_shader_ser_write_string(src.pushConsts.name, sctx);
   header.pushConstants.totalByteCount = src.pushConsts.desc.cbufTotalByteCount;
+
+  {
+    // @NOTE: the type db is built in a way that it's already topsorted!
+    // First all fields are added, then the outer type. If the outer type
+    // is duplicated, then so are all it's fields. If it is not, then
+    // it is added after it's fields and definitely has a greater Id.
+
+    std::vector<SlangShaderTypeReflection> serializedTypes;
+    serializedTypes.emplace_back(); // Id 0
+    for (const auto& type : type_db.types)
+    {
+      std::vector<SlangShaderTypeFieldReflection> serializedFields;
+      for (const auto& field : type.fields)
+      {
+        auto& serializedField = serializedFields.emplace_back();
+        serializedField.name = slang_shader_ser_write_string(field.name, sctx);
+        serializedField.resourceOffset = field.resourceOffset;
+        serializedField.subtypeId = field.subtypeId + 1;
+        if (!field.arrayDims.empty())
+          serializedField.arrayDims =
+            slang_shader_ser_write_typed_array<uint64_t>(field.arrayDims, sctx);
+      }
+      serializedTypes.emplace_back() = {
+        slang_shader_ser_write_typed_array<SlangShaderTypeFieldReflection>(serializedFields, sctx)};
+    }
+    header.typeDb.types =
+      slang_shader_ser_write_typed_array<SlangShaderTypeReflection>(serializedTypes, sctx);
+    header.typeDb.typeHashes =
+      slang_shader_ser_write_typed_array<uint64_t>(type_db.typeHashes, sctx);
+  }
 }
 
 int SlangCompiler::compile(
@@ -902,6 +940,7 @@ int SlangCompiler::compile(
   header->version = SLANG_SHADER_VERSION;
 
   ShaderReflection combinedShaderReflection = {};
+  TypeDb typeDb = {};
 
   spvtools::SpirvTools spvTools(SPV_ENV_UNIVERSAL_1_6); // for validation
   auto printMsgToErrlog =
@@ -983,6 +1022,7 @@ int SlangCompiler::compile(
 
       compile_dset_element(
         shaderReflection,
+        typeDb,
         globalDset,
         nullptr,
         nullptr,
@@ -995,6 +1035,7 @@ int SlangCompiler::compile(
         "");
       compile_dset_element(
         shaderReflection,
+        typeDb,
         globalDset,
         nullptr,
         nullptr,
@@ -1084,7 +1125,7 @@ int SlangCompiler::compile(
     return -3;
   }
 
-  serialize_shader_reflection(combinedShaderReflection, header->refl, sctx);
+  serialize_shader_reflection(combinedShaderReflection, typeDb, header->refl, sctx);
 
   std::string error{};
   if (!slang_shader_ser_write_to_file(sctx, dest.c_str(), error))

@@ -18,7 +18,7 @@ namespace etna
 {
 
 struct DescriptorSetLayoutCache;
-struct ParameterSetCache;
+class ParameterSetCache;
 struct ShaderProgramManager;
 class PipelineManager;
 struct DynamicDescriptorPool;
