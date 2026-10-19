@@ -438,6 +438,7 @@ static void compile_dset_element(
   ResourceReflection* cbuf,
   FieldReflection* field,
   uint64_t* current_field_offset,
+  bool pending_cbuf,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -450,6 +451,8 @@ static void compile_dset_element(
   ResourceReflection* cbuf,
   FieldReflection* field,
   uint64_t* current_field_offset,
+  bool pending_cbuf,
+  const char* leaf_name,
   slang::ProgramLayout* program,
   slang::TypeLayoutReflection* type,
   AccessPath path,
@@ -467,7 +470,8 @@ static void compile_dset_element(
   {
     return;
   }
-  bool hasResources = type->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0;
+  bool hasResources =
+    type->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0 || pending_cbuf;
   switch (typeKind)
   {
   case slang::TypeReflection::Kind::Struct: {
@@ -476,6 +480,12 @@ static void compile_dset_element(
     if (hasResources)
       typeRefl.emplace();
     uint64_t innerOffset = 0;
+    if (pending_cbuf)
+    {
+      auto& cbufField = typeRefl->fields.emplace_back();
+      cbufField.name = "$ImplicitCbuf";
+      cbufField.resourceOffset = 0;
+    }
     for (int f = 0; f < fieldCount; ++f)
     {
       slang::VariableLayoutReflection* fv = type->getFieldByIndex(f);
@@ -484,7 +494,8 @@ static void compile_dset_element(
         ? &typeRefl->fields.emplace_back()
         : nullptr;
       auto* noff = nfield ? &innerOffset : nullptr;
-      compile_dset_element(refl, dset, cbuf, nfield, noff, program, fv, path, arraySize, name);
+      compile_dset_element(
+        refl, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, name);
     }
     if (typeRefl)
     {
@@ -522,6 +533,8 @@ static void compile_dset_element(
       cbuf,
       nfield,
       noff,
+      false,
+      leaf_name,
       program,
       type->getElementTypeLayout(),
       path,
@@ -554,6 +567,7 @@ static void compile_dset_element(
       nestedCbuf->desc.cbufTotalByteCount = innerType->getStride(slang::ParameterCategory::Uniform);
       assert(binds == 1);
       assert(nestedCbuf->desc.cbufTotalByteCount > 0);
+      assert(implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer) == 0);
     }
     else if (auto binds = implicitVarType->getSize(slang::ParameterCategory::PushConstantBuffer);
              binds > 0)
@@ -572,12 +586,28 @@ static void compile_dset_element(
       assert(innerType->getSize(slang::ParameterCategory::Uniform) == 0);
     }
 
+    bool isImplicitCbuf = false;
+    if (nestedCbuf && nestedCbuf != &refl.pushConsts)
+    {
+      isImplicitCbuf = field == nullptr;
+      if (!isImplicitCbuf)
+      {
+        assert(field);
+        field->name = leaf_name;
+        field->resourceOffset = *current_field_offset;
+        field->subtypeId = UINT64_MAX;
+        ++(*current_field_offset);
+      }
+    }
+
     compile_dset_element(
       refl,
       dset,
       nestedCbuf,
       field,
       current_field_offset,
+      isImplicitCbuf,
+      leaf_name,
       program,
       innerType,
       {path.leaf, path.leaf, path.deepestParblock},
@@ -632,6 +662,8 @@ static void compile_dset_element(
       nestedCbuf,
       field,
       current_field_offset,
+      true,
+      leaf_name,
       program,
       innerType,
       {path.leaf, path.leaf, path.leaf},
@@ -642,6 +674,7 @@ static void compile_dset_element(
   }
   case slang::TypeReflection::Kind::Resource: {
     assert(field);
+    field->name = leaf_name;
     field->resourceOffset = *current_field_offset;
     field->subtypeId = UINT64_MAX;
     ++(*current_field_offset);
@@ -694,6 +727,7 @@ static void compile_dset_element(
 
   case slang::TypeReflection::Kind::SamplerState: {
     assert(field);
+    field->name = leaf_name;
     field->resourceOffset = *current_field_offset;
     field->subtypeId = UINT64_MAX;
     ++(*current_field_offset);
@@ -723,6 +757,7 @@ static void compile_dset_element(
   ResourceReflection* cbuf,
   FieldReflection* field,
   uint64_t* current_field_offset,
+  bool pending_cbuf,
   slang::ProgramLayout* program,
   slang::VariableLayoutReflection* var,
   AccessPath path,
@@ -746,6 +781,8 @@ static void compile_dset_element(
     cbuf,
     field,
     current_field_offset,
+    pending_cbuf,
+    leaf_name,
     program,
     var->getTypeLayout(),
     {&node, path.deepestCbuf, path.deepestParblock},
@@ -950,6 +987,7 @@ int SlangCompiler::compile(
         nullptr,
         nullptr,
         nullptr,
+        false,
         progLayout,
         globalScope,
         {},
@@ -961,6 +999,7 @@ int SlangCompiler::compile(
         nullptr,
         nullptr,
         nullptr,
+        false,
         progLayout,
         entryPointScope,
         {},
