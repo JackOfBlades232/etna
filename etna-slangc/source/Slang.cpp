@@ -112,25 +112,28 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
     {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
   if (ci.emitSpirvDebugInfo)
   {
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::DebugInformation,
-      slang::CompilerOptionValue{
-        slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::DebugInformation,
+        slang::CompilerOptionValue{
+          slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
   }
   if (ci.warningsAsErrors)
   {
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::WarningsAsErrors,
-      slang::CompilerOptionValue{
-        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::WarningsAsErrors,
+        slang::CompilerOptionValue{
+          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
   }
   for (const auto& incDir : ci.commonIncludeDirs)
   {
     const auto& str = incDirStrings.emplace_back(to_char_str(incDir.string()));
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::Include,
-      slang::CompilerOptionValue{
-        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::Include,
+        slang::CompilerOptionValue{
+          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
@@ -478,8 +481,17 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::Struct: {
     int fieldCount = type->getFieldCount();
     std::optional<TypeReflection> typeRefl{};
-    if (hasResources)
+    uint64_t& idDest = field ? field->subtypeId : dset.typeId;
+    if (idDest != UINT64_MAX)
+    {
       typeRefl.emplace();
+      for (const auto& field : type_db.types[idDest].fields)
+        typeRefl->fields.push_back(field);
+    }
+    else if (hasResources)
+    {
+      typeRefl.emplace();
+    }
     uint64_t innerOffset = 0;
     if (pending_cbuf)
     {
@@ -491,7 +503,7 @@ static void compile_dset_element(
     {
       slang::VariableLayoutReflection* fv = type->getFieldByIndex(f);
       slang::TypeLayoutReflection* ft = fv->getTypeLayout();
-      auto* nfield = hasResources && ft->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0
+      auto* nfield = typeRefl && ft->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0
         ? &typeRefl->fields.emplace_back()
         : nullptr;
       auto* noff = nfield ? &innerOffset : nullptr;
@@ -500,8 +512,6 @@ static void compile_dset_element(
     }
     if (typeRefl)
     {
-      uint64_t& idDest = field ? field->subtypeId : dset.typeId;
-      assert(idDest == UINT64_MAX);
       idDest = add_type(std::move(*typeRefl), type_db);
       if (current_field_offset)
       {
@@ -876,6 +886,7 @@ static void serialize_shader_reflection(
         std::span<const SlangShaderResourceReflection>{serializedResources}, sctx);
 
       dst.index = dset.index;
+      dst.typeId = dset.typeId + 1;
     }
 
     header.descriptorSets = slang_shader_ser_write_typed_array(

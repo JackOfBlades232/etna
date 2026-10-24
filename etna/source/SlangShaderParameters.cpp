@@ -53,7 +53,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   vk::ShaderStageFlags stage_mask,
   DescriptorSetLayoutCache& layout_cache)
 {
-  for (size_t i = 0; const auto& parset : parameterSets)
+  for (size_t i = 1; const auto& parset : parameterSets)
   {
     if (!compare_loaded_parset(resources, type_id, stage_mask, parset))
       continue;
@@ -173,12 +173,17 @@ std::vector<TypeId> ParameterSetCache::addTypes(const SlangShaderTypeDatabase& d
       for (const auto& field : fields)
       {
         auto name = rebase_ser_string(field.name, blob);
+        auto dims = rebase_ser_array(field.arrayDims, blob);
+        uint32_t flatSize = 1;
+        for (auto dim : dims)
+          flatSize *= dim;
         rtType.fields.emplace(
           std::string{name},
           Field{
             ResourceOffset(field.resourceOffset),
             remapping[field.subtypeId],
-            vec_from_span(rebase_ser_array(field.arrayDims, blob))});
+            vec_from_span(dims),
+            flatSize});
       }
     }
     ++i;

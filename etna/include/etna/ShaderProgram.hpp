@@ -57,6 +57,8 @@ struct ShaderProgramInfo
   DescriptorLayoutId getDescriptorLayoutId(uint32_t set) const;
   const DescriptorSetInfo& getDescriptorSetInfo(uint32_t set) const;
 
+  DsetBindingBuilder dsetBuilder(std::string_view name = "") const;
+
 private:
   ShaderProgramInfo(const ShaderProgramManager& manager, ShaderProgramId prog_id)
     : mgr{manager}

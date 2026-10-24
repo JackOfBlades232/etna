@@ -565,4 +565,16 @@ const DescriptorSetInfo& ShaderProgramInfo::getDescriptorSetInfo(uint32_t set) c
   return get_context().getDescriptorSetLayouts().getLayoutInfo(getDescriptorLayoutId(set));
 }
 
+DsetBindingBuilder ShaderProgramInfo::dsetBuilder(std::string_view name) const
+{
+  const auto& prog = mgr.getProgInternal(id);
+  for (const auto& parsetRef : prog.parameterSets)
+  {
+    if (name == parsetRef.name)
+      return DsetBindingBuilder{get_context().getParameterSets(), parsetRef.psetId};
+  }
+  ETNA_PANIC("Descriptor set \"{}\" not found for program {}", name.data(), prog.name);
+  return {};
+}
+
 } // namespace etna

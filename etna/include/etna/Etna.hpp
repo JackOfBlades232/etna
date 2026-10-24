@@ -9,6 +9,7 @@
 #include <etna/Vulkan.hpp>
 #include <etna/ShaderProgram.hpp>
 #include <etna/DescriptorSet.hpp>
+#include <etna/SlangShaderParameters.hpp>
 #include <etna/Image.hpp>
 #include <etna/BarrierBehavior.hpp>
 
@@ -127,6 +128,22 @@ DescriptorSet create_descriptor_set(
  */
 PersistentDescriptorSet create_persistent_descriptor_set(
   DescriptorLayoutId layout, std::vector<Binding> bindings, bool allow_unbound_slots = false);
+
+inline DescriptorSet create_descriptor_set(
+  vk::CommandBuffer command_buffer,
+  DsetBindingDesc binding_desc,
+  BarrierBehavior behavior = BarrierBehavior::eDefault)
+{
+  return create_descriptor_set(
+    binding_desc.dsetLayoutId, command_buffer, std::move(binding_desc.bindings), behavior);
+}
+
+inline PersistentDescriptorSet create_persistent_descriptor_set(
+  DsetBindingDesc binding_desc, bool allow_unbound_slots = false)
+{
+  return create_persistent_descriptor_set(
+    binding_desc.dsetLayoutId, std::move(binding_desc.bindings), allow_unbound_slots);
+}
 
 Image create_image_from_bytes(
   Image::CreateInfo info, vk::CommandBuffer command_buffer, const void* data);
