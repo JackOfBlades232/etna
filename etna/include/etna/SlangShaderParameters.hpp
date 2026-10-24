@@ -3,11 +3,13 @@
 #define ETNA_SLANG_SHADER_PARAMETERS_HPP_INCLUDED
 
 #include "SlangShaderFormat.hpp"
+#include "DescriptorSetLayout.hpp"
 
 #include <unordered_map>
 #include <vector>
 #include <variant>
 #include <memory>
+#include <string>
 #include <span>
 
 namespace etna
@@ -33,26 +35,30 @@ struct Field
   TypeId subtypeId = TypeId::INVALID;
   std::vector<uint64_t> localArrayDims;
 
-  bool operator==(const Field &) const = default;
+  bool operator==(const Field&) const = default;
 };
 
 struct Type
 {
   std::unordered_map<std::string, Field> fields;
 
-  bool operator==(const Type &) const = default;
+  bool operator==(const Type&) const = default;
 };
 
 struct ResourceDesc
 {
   SlangShaderResourceDesc desc;
   SlangShaderResourceBinding binding;
+
+  bool operator==(const ResourceDesc&) const = default;
 };
 
 struct ParameterSet
 {
   TypeId typeId = TypeId::INVALID;
-  std::vector<ResourceDesc> resources;
+  DescriptorLayoutId dsetLayoutId = -1;
+  std::vector<ResourceDesc> resources{};
+  vk::ShaderStageFlags stageMask = {};
 };
 
 class ParameterSetCache
@@ -69,11 +75,32 @@ public:
     parameterSets.emplace_back();
   }
 
-  ParameterSetId parseRootParameterSet(
-    const SlangShaderDescriptorSetReflection& dset,
-    const char* blob,
-    std::span<const TypeId> typeid_remapping);
+  struct RootParameterSetParseResult
+  {
+    ParameterSetId parsetId;
+    DescriptorSetInfo dsInfo;
+  };
+
+  RootParameterSetParseResult parseRootParameterSet(
+    std::span<const SlangShaderResourceReflection> resources,
+    std::string_view name,
+    TypeId type_id,
+    vk::ShaderStageFlags stage_mask,
+    DescriptorSetLayoutCache& layout_cache);
   std::vector<TypeId> addTypes(const SlangShaderTypeDatabase& db, const char* blob);
+
+  TypeId getRootTypeId(ParameterSetId parset_id) const
+  {
+    return parameterSets[size_t(parset_id)].typeId;
+  }
+  DescriptorLayoutId getRootDsetLayoutId(ParameterSetId parset_id) const
+  {
+    return parameterSets[size_t(parset_id)].dsetLayoutId;
+  }
+  vk::ShaderStageFlags getRootStageMask(ParameterSetId parset_id) const
+  {
+    return parameterSets[size_t(parset_id)].stageMask;
+  }
 };
 
 

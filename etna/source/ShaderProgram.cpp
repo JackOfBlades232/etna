@@ -407,18 +407,16 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
   for (const auto& dset : dsets)
   {
     auto resources = rebase_ser_array(dset.resources, data.data());
+    auto name = rebase_ser_string(dset.name, data.data());
 
-    DescriptorSetInfo dsInfo;
-    dsInfo.parseReflection(stageMask, resources);
+    auto [parsetId, dsInfo] = parameterSetCache.parseRootParameterSet(
+      resources, name, typeRemap[dset.typeId], stageMask, descriptorLayoutCache);
 
     usedDescriptors.set(dset.index);
     dstDescriptors[dset.index] = dsInfo;
     usedDescriptorSetRange = std::max(uint32_t(dset.index + 1), usedDescriptorSetRange);
 
-    parameterSets.emplace_back(
-      std::string{rebase_ser_string(dset.name, data.data())},
-      parameterSetCache.parseRootParameterSet(dset, data.data(), typeRemap),
-      uint32_t(dset.index));
+    parameterSets.emplace_back(std::string{name}, parsetId, uint32_t(dset.index));
   }
 
   pushConst = {};
@@ -428,13 +426,22 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
   constexpr DescriptorSetInfo NULL_DSET_INFO{};
 
   std::vector<vk::DescriptorSetLayout> vkLayouts;
-  for (uint32_t i = 0; i < usedDescriptorSetRange; i++)
+  for (uint32_t i = 0, validId = 0; i < usedDescriptorSetRange; i++)
   {
-    const DescriptorSetInfo& dsetInfo =
-      usedDescriptors.test(i) ? dstDescriptors[i] : NULL_DSET_INFO;
-    auto res = descriptorLayoutCache.get(get_context().getDevice(), dsetInfo);
-    descriptorIds[i] = res.first;
-    vkLayouts.push_back(res.second);
+    if (usedDescriptors.test(i))
+    {
+      DescriptorLayoutId layoutId =
+        parameterSetCache.getRootDsetLayoutId(parameterSets[validId++].psetId);
+      descriptorIds[i] = layoutId;
+      vkLayouts.push_back(descriptorLayoutCache.getVkLayout(layoutId));
+    }
+    else
+    {
+      auto [layoutId, layout] =
+        descriptorLayoutCache.get(get_context().getDevice(), NULL_DSET_INFO);
+      descriptorIds[i] = layoutId;
+      vkLayouts.push_back(layout);
+    }
   }
 
   vk::PipelineLayoutCreateInfo info{};

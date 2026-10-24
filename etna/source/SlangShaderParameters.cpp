@@ -1,5 +1,6 @@
 #include <etna/SlangShaderParameters.hpp>
 
+#include <etna/GlobalContext.hpp>
 #include <etna/Assert.hpp>
 
 #include <span>
@@ -19,16 +20,66 @@ static std::string_view rebase_ser_string(const SlangShaderString& ref, const ch
   return std::string_view{(const char*)(blob + ref.byteOffset), ref.charCount};
 }
 
-ParameterSetId ParameterSetCache::parseRootParameterSet(
-  const SlangShaderDescriptorSetReflection& dset,
-  const char* blob,
-  std::span<const TypeId> typeid_remapping)
+static bool compare_loaded_parset(
+  std::span<const SlangShaderResourceReflection> resources,
+  TypeId type_id,
+  vk::ShaderStageFlags stage_mask,
+  const ParameterSet& parset)
 {
-  (void)dset;
-  (void)blob;
-  (void)typeid_remapping;
-  // ETNA_ASSERTF(0, "TODO");
-  return ParameterSetId::INVALID;
+  if (type_id != parset.typeId)
+    return false;
+  if (resources.size() != parset.resources.size())
+    return false;
+  bool resourcesEq = true;
+  for (size_t rid = 0; rid < resources.size(); ++rid)
+  {
+    if (
+      resources[rid].binding != parset.resources[rid].binding ||
+      resources[rid].desc != parset.resources[rid].desc)
+    {
+      resourcesEq = false;
+      break;
+    }
+  }
+  if (!resourcesEq)
+    return false;
+  return (parset.stageMask & stage_mask) == stage_mask; // subsuming is ok for reuse
+}
+
+ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParameterSet(
+  std::span<const SlangShaderResourceReflection> resources,
+  std::string_view name,
+  TypeId type_id,
+  vk::ShaderStageFlags stage_mask,
+  DescriptorSetLayoutCache& layout_cache)
+{
+  for (size_t i = 0; const auto& parset : parameterSets)
+  {
+    if (!compare_loaded_parset(resources, type_id, stage_mask, parset))
+      continue;
+
+    parameterSetMap.emplace(std::string{name}, ParameterSetId(i));
+    return {ParameterSetId(i), layout_cache.getLayoutInfo(parset.dsetLayoutId)};
+  }
+
+  ParameterSetId retId = ParameterSetId(parameterSets.size());
+  parameterSetMap.emplace(std::string{name}, retId);
+
+  auto& parset = parameterSets.emplace_back();
+  parset.typeId = type_id;
+
+  DescriptorSetInfo dsInfo;
+  dsInfo.parseReflection(stage_mask, resources);
+
+  parset.dsetLayoutId = layout_cache.get(get_context().getDevice(), dsInfo).first;
+
+  parset.resources.resize(resources.size());
+  for (size_t i = 0; const auto &res : resources)
+    parset.resources[i++] = {res.desc, res.binding};
+
+  parset.stageMask = stage_mask;
+
+  return {retId, dsInfo};
 }
 
 template <class T>
