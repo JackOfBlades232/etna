@@ -112,28 +112,25 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
     {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
   if (ci.emitSpirvDebugInfo)
   {
-    options.push_back(
-      slang::CompilerOptionEntry{
-        slang::CompilerOptionName::DebugInformation,
-        slang::CompilerOptionValue{
-          slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::DebugInformation,
+      slang::CompilerOptionValue{
+        slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
   }
   if (ci.warningsAsErrors)
   {
-    options.push_back(
-      slang::CompilerOptionEntry{
-        slang::CompilerOptionName::WarningsAsErrors,
-        slang::CompilerOptionValue{
-          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::WarningsAsErrors,
+      slang::CompilerOptionValue{
+        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
   }
   for (const auto& incDir : ci.commonIncludeDirs)
   {
     const auto& str = incDirStrings.emplace_back(to_char_str(incDir.string()));
-    options.push_back(
-      slang::CompilerOptionEntry{
-        slang::CompilerOptionName::Include,
-        slang::CompilerOptionValue{
-          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
+    options.push_back(slang::CompilerOptionEntry{
+      slang::CompilerOptionName::Include,
+      slang::CompilerOptionValue{
+        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
@@ -446,6 +443,7 @@ static void compile_dset_element(
   slang::VariableLayoutReflection* var,
   AccessPath path,
   size_t arraySize,
+  uint64_t base_field_offset,
   const char* base_name);
 
 static void compile_dset_element(
@@ -461,11 +459,33 @@ static void compile_dset_element(
   slang::TypeLayoutReflection* type,
   AccessPath path,
   size_t arraySize,
+  uint64_t base_field_offset,
   const char* name)
 {
   auto typeKind = type->getKind();
   auto parCat = type->getParameterCategory();
+  bool hasResources =
+    type->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0 || pending_cbuf;
+  if (                                                 // Global scope without implicit cbuf
+    parCat == slang::ParameterCategory::None &&        //
+    typeKind == slang::TypeReflection::Kind::Struct && //
+    !field)
+  {
+    assert(type->getSize(slang::ParameterCategory::Uniform) == 0);
+    int fieldCount = type->getFieldCount();
+    for (int f = 0; f < fieldCount; ++f)
+    {
+      slang::VariableLayoutReflection* fv = type->getFieldByIndex(f);
+      slang::TypeLayoutReflection* ft = fv->getTypeLayout();
+      if (ft->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0)
+      {
+        hasResources = true;
+        break;
+      }
+    }
+  }
   if (
+    !hasResources &&                                           //
     parCat != slang::ParameterCategory::Mixed &&               //
     parCat != slang::ParameterCategory::Uniform &&             //
     parCat != slang::ParameterCategory::DescriptorTableSlot && //
@@ -474,8 +494,7 @@ static void compile_dset_element(
   {
     return;
   }
-  bool hasResources =
-    type->getSize(slang::ParameterCategory::DescriptorTableSlot) > 0 || pending_cbuf;
+
   switch (typeKind)
   {
   case slang::TypeReflection::Kind::Struct: {
@@ -497,7 +516,7 @@ static void compile_dset_element(
     {
       auto& cbufField = typeRefl->fields.emplace_back();
       cbufField.name = "$ImplicitCbuf";
-      cbufField.resourceOffset = 0;
+      cbufField.resourceOffset = base_field_offset;
     }
     for (int f = 0; f < fieldCount; ++f)
     {
@@ -508,14 +527,14 @@ static void compile_dset_element(
         : nullptr;
       auto* noff = nfield ? &innerOffset : nullptr;
       compile_dset_element(
-        refl, type_db, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, name);
+        refl, type_db, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, base_field_offset, name);
     }
     if (typeRefl)
     {
       idDest = add_type(std::move(*typeRefl), type_db);
       if (current_field_offset)
       {
-        field->resourceOffset = *current_field_offset;
+        field->resourceOffset = base_field_offset + *current_field_offset;
         *current_field_offset += innerOffset;
       }
     }
@@ -551,6 +570,7 @@ static void compile_dset_element(
       type->getElementTypeLayout(),
       path,
       array_size_mul(arraySize, elementCount),
+      base_field_offset,
       arrayName.c_str());
     break;
   }
@@ -606,7 +626,7 @@ static void compile_dset_element(
       {
         assert(field);
         field->name = leaf_name;
-        field->resourceOffset = *current_field_offset;
+        field->resourceOffset = base_field_offset + *current_field_offset;
         field->subtypeId = UINT64_MAX;
         ++(*current_field_offset);
       }
@@ -625,6 +645,7 @@ static void compile_dset_element(
       innerType,
       {path.leaf, path.leaf, path.deepestParblock},
       arraySize,
+      base_field_offset,
       name);
 
     break;
@@ -682,6 +703,7 @@ static void compile_dset_element(
       innerType,
       {path.leaf, path.leaf, path.leaf},
       arraySize,
+      base_field_offset,
       dsetName);
 
     break;
@@ -689,7 +711,7 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::Resource: {
     assert(field);
     field->name = leaf_name;
-    field->resourceOffset = *current_field_offset;
+    field->resourceOffset = base_field_offset + *current_field_offset;
     field->subtypeId = UINT64_MAX;
     ++(*current_field_offset);
 
@@ -742,7 +764,7 @@ static void compile_dset_element(
   case slang::TypeReflection::Kind::SamplerState: {
     assert(field);
     field->name = leaf_name;
-    field->resourceOffset = *current_field_offset;
+    field->resourceOffset = base_field_offset + *current_field_offset;
     field->subtypeId = UINT64_MAX;
     ++(*current_field_offset);
 
@@ -777,6 +799,7 @@ static void compile_dset_element(
   slang::VariableLayoutReflection* var,
   AccessPath path,
   size_t arraySize,
+  uint64_t base_field_offset,
   const char* base_name)
 {
   const char* leaf_name = var->getName();
@@ -803,6 +826,7 @@ static void compile_dset_element(
     var->getTypeLayout(),
     {&node, path.deepestCbuf, path.deepestParblock},
     arraySize,
+    base_field_offset,
     name.c_str());
 }
 
@@ -1043,6 +1067,7 @@ int SlangCompiler::compile(
         globalScope,
         {},
         1,
+        0,
         "");
       compile_dset_element(
         shaderReflection,
@@ -1056,6 +1081,7 @@ int SlangCompiler::compile(
         entryPointScope,
         {},
         1,
+        globalDset.resources.size(),
         "$EntryPoint");
 
       std::erase_if(shaderReflection.dsets, dset_is_empty);
@@ -1065,7 +1091,9 @@ int SlangCompiler::compile(
       else
         moduleDest->declaresPushConsts = 0;
 
+      // @TODO: we need merged typedefs generated and reidentified
       merge_shader_reflection(combinedShaderReflection, shaderReflection);
+      // @TODO: after this, we need type db pruning and reindexing (with same order)
     }
 
     if (stage == SLANG_STAGE_COMPUTE)

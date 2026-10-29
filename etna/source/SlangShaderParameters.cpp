@@ -53,10 +53,13 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   vk::ShaderStageFlags stage_mask,
   DescriptorSetLayoutCache& layout_cache)
 {
-  for (size_t i = 1; const auto& parset : parameterSets)
+  for (size_t i = 0; const auto& parset : parameterSets)
   {
     if (!compare_loaded_parset(resources, type_id, stage_mask, parset))
+    {
+      ++i;
       continue;
+    }
 
     parameterSetMap.emplace(std::string{name}, ParameterSetId(i));
     return {ParameterSetId(i), layout_cache.getLayoutInfo(parset.dsetLayoutId)};

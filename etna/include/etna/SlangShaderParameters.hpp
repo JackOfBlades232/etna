@@ -85,6 +85,7 @@ class DsetBindingBuilder
 
 public:
   DsetBindingBuilder& setTex(std::string_view name, etna::ImageBinding&& value);
+  DsetBindingBuilder& setCbuf(std::string_view name, etna::BufferBinding&& value);
 
   DsetBindingBuilder subtype(std::string_view name);
   DsetBindingBuilder& end();
@@ -159,6 +160,19 @@ inline DsetBindingBuilder& DsetBindingBuilder::setTex(
 {
   const auto& field = cache->getTypeField(typeId, name);
   ETNA_VERIFYF(field.subtypeId == TypeId::INVALID, "{} is a subtype field, not a texture", name);
+  ETNA_VERIFYF(field.localArrayDims.empty(), "{} is an array field", name);
+  const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
+  // @TODO: validate type and usage
+  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  builtBindings.emplace_back(desc.binding.binding, std::move(value), arrayOffset);
+  return *this;
+}
+
+inline DsetBindingBuilder& DsetBindingBuilder::setCbuf(
+  std::string_view name, etna::BufferBinding&& value)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_VERIFYF(field.subtypeId == TypeId::INVALID, "{} is a subtype field, not a consbuffer", name);
   ETNA_VERIFYF(field.localArrayDims.empty(), "{} is an array field", name);
   const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
   // @TODO: validate type and usage
