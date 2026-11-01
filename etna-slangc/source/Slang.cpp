@@ -863,27 +863,99 @@ static void merge_dset_reflection(
 {
   assert(!dset_is_empty(combined) && !dset_is_empty(src));
   assert(combined.name == src.name);
-  TypeReflection combinedRootType = type_db.types[combined.typeId];
-  const TypeReflection& srcRootType = type_db.types[src.typeId];
 
-  // @TODO: determine type merging rules
-  (void)combinedRootType;
-  (void)srcRootType;
+  // @TODO: this definitely needs a better final imlementation, just winging for correctness
+
+  std::vector<ResourceReflection> flatCombinedResources = combined.resources;
 
   for (const auto& res : src.resources)
   {
     bool merged = false;
-    for (auto& combRes : combined.resources)
+    for (auto& combRes : flatCombinedResources)
     {
       if (combRes.binding.binding == res.binding.binding)
       {
         merge_res_reflection(combRes, res);
         merged = true;
+        break;
       }
     }
     if (!merged)
-      combined.resources.push_back(res);
+      flatCombinedResources.push_back(res);
   }
+
+  if (combined.typeId == src.typeId)
+  {
+    combined.resources = std::move(flatCombinedResources);
+    return;
+  }
+
+  const TypeReflection& combinedRootType = type_db.types[combined.typeId];
+  const TypeReflection& srcRootType = type_db.types[src.typeId];
+
+  TypeReflection newRootType;
+  std::vector<ResourceReflection> reorderedResources;
+
+  auto addField = [&](
+                    const auto& f,
+                    size_t field_id,
+                    const TypeReflection& type,
+                    const DescriptorSetReflection& dset) {
+    newRootType.fields.push_back(f);
+    const size_t viewRangeStart = f.resourceOffset;
+    const size_t viewRangeEnd = field_id == type.fields.size() - 1
+      ? dset.resources.size()
+      : type.fields[field_id + 1].resourceOffset;
+    newRootType.fields.back().resourceOffset = reorderedResources.size();
+    reorderedResources.resize(reorderedResources.size() + (viewRangeEnd - viewRangeStart));
+    std::copy(
+      dset.resources.begin() + viewRangeStart,
+      dset.resources.begin() + viewRangeEnd,
+      reorderedResources.begin() + newRootType.fields.back().resourceOffset);
+  };
+
+  for (const auto& f : srcRootType.fields)
+  {
+    for (size_t i = 0; const auto& cf : combinedRootType.fields)
+    {
+      const size_t combinedFieldId = i++;
+      if (f == cf)
+      {
+        addField(cf, combinedFieldId, combinedRootType, combined);
+        break;
+      }
+    }
+  }
+
+  for (size_t i = 0; const auto& f : srcRootType.fields)
+  {
+    const size_t srcFieldId = i++;
+    if (
+      std::find(combinedRootType.fields.begin(), combinedRootType.fields.end(), f) !=
+      combinedRootType.fields.end())
+    {
+      continue;
+    }
+
+    addField(f, srcFieldId, srcRootType, src);
+  }
+
+  for (size_t i = 0; const auto& f : combinedRootType.fields)
+  {
+    const size_t combinedFieldId = i++;
+    if (
+      std::find(srcRootType.fields.begin(), srcRootType.fields.end(), f) !=
+      srcRootType.fields.end())
+    {
+      continue;
+    }
+
+    addField(f, combinedFieldId, combinedRootType, combined);
+  }
+
+  assert(reorderedResources.size() == flatCombinedResources.size());
+  combined.resources = std::move(reorderedResources);
+  combined.typeId = add_type(std::move(newRootType), type_db);
 }
 
 static void merge_shader_reflection(
