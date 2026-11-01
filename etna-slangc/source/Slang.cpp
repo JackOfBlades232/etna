@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <vector>
 #include <array>
+#include <unordered_map>
+#include <unordered_set>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -527,7 +529,19 @@ static void compile_dset_element(
         : nullptr;
       auto* noff = nfield ? &innerOffset : nullptr;
       compile_dset_element(
-        refl, type_db, dset, cbuf, nfield, noff, false, program, fv, path, arraySize, base_field_offset, name);
+        refl,
+        type_db,
+        dset,
+        cbuf,
+        nfield,
+        noff,
+        false,
+        program,
+        fv,
+        path,
+        arraySize,
+        base_field_offset,
+        name);
     }
     if (typeRefl)
     {
@@ -845,10 +859,17 @@ static void merge_res_reflection(ResourceReflection& combined, const ResourceRef
 }
 
 static void merge_dset_reflection(
-  DescriptorSetReflection& combined, const DescriptorSetReflection& src)
+  DescriptorSetReflection& combined, const DescriptorSetReflection& src, TypeDb& type_db)
 {
   assert(!dset_is_empty(combined) && !dset_is_empty(src));
   assert(combined.name == src.name);
+  TypeReflection combinedRootType = type_db.types[combined.typeId];
+  const TypeReflection& srcRootType = type_db.types[src.typeId];
+
+  // @TODO: determine type merging rules
+  (void)combinedRootType;
+  (void)srcRootType;
+
   for (const auto& res : src.resources)
   {
     bool merged = false;
@@ -865,7 +886,8 @@ static void merge_dset_reflection(
   }
 }
 
-static void merge_shader_reflection(ShaderReflection& combined, const ShaderReflection& src)
+static void merge_shader_reflection(
+  ShaderReflection& combined, const ShaderReflection& src, TypeDb& type_db)
 {
   for (const auto& dset : src.dsets)
   {
@@ -874,7 +896,7 @@ static void merge_shader_reflection(ShaderReflection& combined, const ShaderRefl
     {
       if (combDset.index == dset.index)
       {
-        merge_dset_reflection(combDset, dset);
+        merge_dset_reflection(combDset, dset, type_db);
         merged = true;
       }
     }
@@ -882,6 +904,53 @@ static void merge_shader_reflection(ShaderReflection& combined, const ShaderRefl
       combined.dsets.push_back(dset);
   }
   merge_res_reflection(combined.pushConsts, src.pushConsts);
+}
+
+static void add_referenced_type(
+  std::unordered_set<uint64_t>& refs, uint64_t type_id, const TypeDb& type_db)
+{
+  if (type_id == UINT64_MAX)
+    return;
+  auto [_, isNew] = refs.emplace(type_id);
+  if (!isNew)
+    return;
+  for (const auto& f : type_db.types[type_id].fields)
+    add_referenced_type(refs, f.subtypeId, type_db);
+}
+
+static void prune_unreferenced_types(TypeDb& type_db, ShaderReflection& shader)
+{
+  std::unordered_set<uint64_t> referenced{};
+  for (const auto& dset : shader.dsets)
+    add_referenced_type(referenced, dset.typeId, type_db);
+  std::vector<uint64_t> linRefs;
+  linRefs.reserve(referenced.size());
+  for (uint64_t id : referenced)
+    linRefs.push_back(id);
+  std::sort(linRefs.begin(), linRefs.end());
+  std::vector<uint64_t> remap(type_db.types.size(), UINT64_MAX);
+  for (size_t i = 0; uint64_t ref : linRefs)
+    remap[ref] = i++;
+  TypeDb newDb{};
+  newDb.types.resize(linRefs.size());
+  newDb.typeHashes.resize(linRefs.size());
+  for (size_t i = 0; uint64_t ref : linRefs)
+  {
+    const size_t dstId = i++;
+    newDb.types[dstId] = type_db.types[ref];
+    newDb.typeHashes[dstId] = type_db.typeHashes[ref];
+    for (auto& f : newDb.types[dstId].fields)
+    {
+      if (f.subtypeId != UINT64_MAX)
+        f.subtypeId = remap[f.subtypeId];
+    }
+  }
+  type_db = std::move(newDb);
+  for (auto& dset : shader.dsets)
+  {
+    if (dset.typeId != UINT64_MAX)
+      dset.typeId = remap[dset.typeId];
+  }
 }
 
 static void serialize_shader_reflection(
@@ -1091,9 +1160,7 @@ int SlangCompiler::compile(
       else
         moduleDest->declaresPushConsts = 0;
 
-      // @TODO: we need merged typedefs generated and reidentified
-      merge_shader_reflection(combinedShaderReflection, shaderReflection);
-      // @TODO: after this, we need type db pruning and reindexing (with same order)
+      merge_shader_reflection(combinedShaderReflection, shaderReflection, typeDb);
     }
 
     if (stage == SLANG_STAGE_COMPUTE)
@@ -1164,6 +1231,7 @@ int SlangCompiler::compile(
     return -3;
   }
 
+  prune_unreferenced_types(typeDb, combinedShaderReflection);
   serialize_shader_reflection(combinedShaderReflection, typeDb, header->refl, sctx);
 
   std::string error{};
