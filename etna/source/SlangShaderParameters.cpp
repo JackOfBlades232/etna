@@ -20,6 +20,160 @@ static std::string_view rebase_ser_string(const SlangShaderString& ref, const ch
   return std::string_view{(const char*)(blob + ref.byteOffset), ref.charCount};
 }
 
+uint32_t DsetBindingBuilder::buildFlatArrayIndex(
+  std::initializer_list<uint32_t> indices, const Field& field, std::string_view name) const
+{
+  if (field.localArrayDims.empty())
+  {
+    ETNA_ASSERTF(indices.size() == 0, "\"{}\" is not an array field", name);
+    return arrayOffset;
+  }
+  else
+  {
+    ETNA_ASSERTF(
+      field.localArrayDims.size() == indices.size(),
+      "\"{}\" is an array field of different dimensionality {}",
+      name,
+      field.localArrayDims.size());
+  }
+  uint32_t flat = 0;
+  for (size_t i = 0; uint32_t id : indices)
+  {
+    flat += id;
+    if (i < field.localArrayDims.size() - 1)
+      flat *= uint32_t(field.localArrayDims[i + 1]);
+  }
+  return arrayOffset * uint32_t(field.flatArraySize) + flat;
+}
+
+DsetBindingBuilder& DsetBindingBuilder::setTex(
+  std::string_view name,
+  etna::ImageBinding&& value,
+  std::initializer_list<uint32_t> local_array_indices)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_ASSERTF(
+    field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a texture", name);
+  const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
+  if (value.descriptor_info.sampler)
+  {
+    ETNA_ASSERTF(
+      desc.desc.type == SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER,
+      "\"{}\" is not a combined image sampler",
+      name);
+  }
+  else
+  {
+    ETNA_ASSERTF(
+      desc.desc.type == SlangShaderResourceType::TEXTURE, "\"{}\" is not a texture", name);
+  }
+  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  builtBindings.emplace_back(
+    desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
+  return *this;
+}
+
+DsetBindingBuilder& DsetBindingBuilder::setSmp(
+  std::string_view name,
+  etna::SamplerBinding&& value,
+  std::initializer_list<uint32_t> local_array_indices)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_ASSERTF(
+    field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a sampler", name);
+  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
+  ETNA_ASSERTF(desc.desc.type == SlangShaderResourceType::SAMPLER, "\"{}\" is not a sampler", name);
+  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  builtBindings.emplace_back(
+    desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
+  return *this;
+}
+
+DsetBindingBuilder& DsetBindingBuilder::setBuf(
+  std::string_view name,
+  etna::BufferBinding&& value,
+  std::initializer_list<uint32_t> local_array_indices)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_ASSERTF(field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a buffer", name);
+  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
+  ETNA_ASSERTF(desc.desc.type == SlangShaderResourceType::BUFFER, "\"{}\" is not a buffer", name);
+  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  builtBindings.emplace_back(
+    desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
+  return *this;
+}
+
+DsetBindingBuilder& DsetBindingBuilder::setCbuf(
+  std::string_view name,
+  etna::BufferBinding&& value,
+  std::initializer_list<uint32_t> local_array_indices)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_ASSERTF(
+    field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a constbuffer", name);
+  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
+  ETNA_ASSERTF(
+    desc.desc.type == SlangShaderResourceType::CONSTBUFFER, "\"{}\" is not a constbuffer", name);
+  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  builtBindings.emplace_back(
+    desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
+  return *this;
+}
+
+DsetBindingBuilder DsetBindingBuilder::subtype(
+  std::string_view name, std::initializer_list<uint32_t> local_array_indices)
+{
+  const auto& field = cache->getTypeField(typeId, name);
+  ETNA_ASSERTF(field.subtypeId != TypeId::INVALID, "{} is a resource field, not a subtype", name);
+  ETNA_ASSERTF(field.localArrayDims.empty(), "{} is an array field", name);
+  return {
+    *this,
+    field.subtypeId,
+    offset + field.resourceOffset,
+    buildFlatArrayIndex(local_array_indices, field, name)};
+}
+
+DsetBindingBuilder& DsetBindingBuilder::end()
+{
+  ETNA_ASSERT(parent);
+  return *parent;
+}
+
+DsetBindingDesc DsetBindingBuilder::build()
+{
+  ETNA_ASSERT(!parent);
+  DsetBindingDesc desc{};
+  desc.parsetId = parsetId;
+  desc.dsetLayoutId = cache->getRootDsetLayoutId(parsetId);
+  desc.bindings = std::move(builtBindings); // @TODO: validate completeness?
+  *this = {};
+  return desc;
+}
+
+DsetBindingBuilder::DsetBindingBuilder(const ParameterSetCache& cache, ParameterSetId parset_id)
+  : cache{&cache}
+  , parsetId{parset_id}
+  , typeId{cache.getRootTypeId(parset_id)}
+{
+}
+
+DsetBindingBuilder::DsetBindingBuilder(
+  DsetBindingBuilder& parent, TypeId type_id, uint32_t offset, uint32_t array_offset)
+  : cache{parent.cache}
+  , parent{&parent}
+  , parsetId{parent.parsetId}
+  , typeId{type_id}
+  , offset{offset}
+  , arrayOffset{array_offset}
+{
+}
+
 static bool compare_loaded_parset(
   std::span<const SlangShaderResourceReflection> resources,
   TypeId type_id,
@@ -77,7 +231,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   parset.dsetLayoutId = layout_cache.get(get_context().getDevice(), dsInfo).first;
 
   parset.resources.resize(resources.size());
-  for (size_t i = 0; const auto &res : resources)
+  for (size_t i = 0; const auto& res : resources)
     parset.resources[i++] = {res.desc, res.binding};
 
   parset.stageMask = stage_mask;
