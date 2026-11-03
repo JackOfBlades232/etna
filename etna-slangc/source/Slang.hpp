@@ -24,6 +24,7 @@ public:
     std::vector<std::filesystem::path> commonIncludeDirs = {};
     bool emitSpirvDebugInfo = false;
     bool warningsAsErrors = false;
+    SlangOptimizationLevel optLevel = SLANG_OPTIMIZATION_LEVEL_DEFAULT;
   };
 
   explicit SlangCompiler(const CreateInfo& ci);

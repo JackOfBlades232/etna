@@ -75,6 +75,23 @@ int main(int argc, char** argv)
              output = path;
              return true;
            }},
+        {.name = {"-O"},
+         .desc = "specifies optimization level 0-3",
+         .valueCb =
+           [&](std::string_view level) {
+             slangCi.optLevel = SlangOptimizationLevel(std::atoi(level.data()));
+             if (
+               slangCi.optLevel != SLANG_OPTIMIZATION_LEVEL_NONE &&
+               slangCi.optLevel != SLANG_OPTIMIZATION_LEVEL_DEFAULT &&
+               slangCi.optLevel != SLANG_OPTIMIZATION_LEVEL_HIGH &&
+               slangCi.optLevel != SLANG_OPTIMIZATION_LEVEL_MAXIMAL)
+             {
+               spdlog::error(
+                 "Invalid usage: invalid optimization level \"{}\", must be one of 0-3", level);
+               return false;
+             }
+             return true;
+           }},
         {.name = {"-df", "--depfile"},
          .desc = "specifies output path for (c)make dependency file",
          .valueCb =

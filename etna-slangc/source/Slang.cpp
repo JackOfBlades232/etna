@@ -111,7 +111,9 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
     {slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}},
     {slang::CompilerOptionName::SkipSPIRVValidation, {slang::CompilerOptionValueKind::Int, 0}},
     {slang::CompilerOptionName::VulkanUseEntryPointName, {slang::CompilerOptionValueKind::Int, 1}},
-    {slang::CompilerOptionName::MatrixLayoutColumn, {slang::CompilerOptionValueKind::Int, 1}}};
+    {slang::CompilerOptionName::MatrixLayoutRow, {slang::CompilerOptionValueKind::Int, 1}},
+    {slang::CompilerOptionName::Optimization, {slang::CompilerOptionValueKind::Int, int(ci.optLevel)}},
+  };
   if (ci.emitSpirvDebugInfo)
   {
     options.push_back(slang::CompilerOptionEntry{
