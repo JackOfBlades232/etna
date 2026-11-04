@@ -112,29 +112,34 @@ SlangCompiler::SlangCompiler(const CreateInfo& ci)
     {slang::CompilerOptionName::SkipSPIRVValidation, {slang::CompilerOptionValueKind::Int, 0}},
     {slang::CompilerOptionName::VulkanUseEntryPointName, {slang::CompilerOptionValueKind::Int, 1}},
     {slang::CompilerOptionName::MatrixLayoutRow, {slang::CompilerOptionValueKind::Int, 1}},
-    {slang::CompilerOptionName::Optimization, {slang::CompilerOptionValueKind::Int, int(ci.optLevel)}},
-  };
+    {slang::CompilerOptionName::Optimization,
+     {slang::CompilerOptionValueKind::Int, int(ci.optLevel)}},
+    {slang::CompilerOptionName::BindlessSpaceIndex,
+     {slang::CompilerOptionValueKind::Int, int(BINDLESS_SPACE)}}};
   if (ci.emitSpirvDebugInfo)
   {
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::DebugInformation,
-      slang::CompilerOptionValue{
-        slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::DebugInformation,
+        slang::CompilerOptionValue{
+          slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
   }
   if (ci.warningsAsErrors)
   {
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::WarningsAsErrors,
-      slang::CompilerOptionValue{
-        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::WarningsAsErrors,
+        slang::CompilerOptionValue{
+          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = "all"}});
   }
   for (const auto& incDir : ci.commonIncludeDirs)
   {
     const auto& str = incDirStrings.emplace_back(to_char_str(incDir.string()));
-    options.push_back(slang::CompilerOptionEntry{
-      slang::CompilerOptionName::Include,
-      slang::CompilerOptionValue{
-        .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
+    options.push_back(
+      slang::CompilerOptionEntry{
+        slang::CompilerOptionName::Include,
+        slang::CompilerOptionValue{
+          .kind = slang::CompilerOptionValueKind::String, .stringValue0 = str.c_str()}});
   }
 
   sessionDesc.compilerOptionEntries = options.data();
@@ -287,6 +292,7 @@ struct ShaderReflection
 {
   std::vector<DescriptorSetReflection> dsets;
   PushConstantsReflection pushConsts;
+  bool hasBindless = false;
 };
 
 struct AccessPathNode
@@ -1257,6 +1263,17 @@ int SlangCompiler::compile(
         spdlog::error(
           "Can't generate spirv for program with entrypoint {} from {}", ep, source.string());
         return -3;
+      }
+    }
+
+    {
+      slang::IBindlessResourceMetadata* bindlessMd = nullptr;
+      if (
+        SLANG_SUCCEEDED(linkedProgram->queryInterface(
+          slang::SLANG_UUID_IBindlessResourceMetadata, (void**)&bindlessMd)) &&
+        bindlessMd->usesBindlessResourceHeap())
+      {
+        header->refl.bindlessSpace = BINDLESS_SPACE;
       }
     }
 

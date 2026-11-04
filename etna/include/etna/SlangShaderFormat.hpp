@@ -7,6 +7,8 @@
 namespace etna
 {
 
+inline constexpr uint64_t BINDLESS_SPACE = 3;
+
 static_assert(std::endian::native == std::endian::little);
 
 // @TODO: more proper values
@@ -119,6 +121,7 @@ struct SlangShaderReflectionHeader
   uint64_t numThreadsX;
   uint64_t numThreadsY;
   uint64_t numThreadsZ;
+  uint64_t bindlessSpace;
 };
 
 struct SlangShaderModuleRef
