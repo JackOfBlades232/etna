@@ -286,13 +286,13 @@ struct TypeDb
 {
   std::vector<TypeReflection> types;
   std::vector<size_t> typeHashes;
+  uint64_t bindlessTypeId = UINT64_MAX;
 };
 
 struct ShaderReflection
 {
   std::vector<DescriptorSetReflection> dsets;
   PushConstantsReflection pushConsts;
-  bool hasBindless = false;
 };
 
 struct AccessPathNode
@@ -1194,8 +1194,9 @@ int SlangCompiler::compile(
       return -3;
     }
 
+    ShaderReflection shaderReflection = {};
+
     {
-      ShaderReflection shaderReflection = {};
       shaderReflection.dsets.reserve(PREALLOC_COUNT);
 
       slang::VariableLayoutReflection* globalScope = progLayout->getGlobalParamsVarLayout();
@@ -1239,8 +1240,6 @@ int SlangCompiler::compile(
         moduleDest->declaresPushConsts = 1;
       else
         moduleDest->declaresPushConsts = 0;
-
-      merge_shader_reflection(combinedShaderReflection, shaderReflection, typeDb);
     }
 
     if (stage == SLANG_STAGE_COMPUTE)
@@ -1273,9 +1272,60 @@ int SlangCompiler::compile(
           slang::SLANG_UUID_IBindlessResourceMetadata, (void**)&bindlessMd)) &&
         bindlessMd->usesBindlessResourceHeap())
       {
-        header->refl.bindlessSpace = BINDLESS_SPACE;
+        if (typeDb.bindlessTypeId == UINT64_MAX)
+        {
+          TypeReflection bindlessType{};
+          bindlessType.fields.emplace_back("$SamplerHeap", 0, UINT64_MAX, std::vector{UINT64_MAX});
+          bindlessType.fields.emplace_back(
+            "$CombinedTextureSamplerHeap", 1, UINT64_MAX, std::vector{UINT64_MAX});
+          bindlessType.fields.emplace_back("$TextureHeap", 2, UINT64_MAX, std::vector{UINT64_MAX});
+          bindlessType.fields.emplace_back(
+            "$RWTextureHeap", 3, UINT64_MAX, std::vector{UINT64_MAX});
+          bindlessType.fields.emplace_back("$BufferHeap", 4, UINT64_MAX, std::vector{UINT64_MAX});
+          bindlessType.fields.emplace_back("$RWBufferHeap", 5, UINT64_MAX, std::vector{UINT64_MAX});
+          typeDb.bindlessTypeId = add_type(std::move(bindlessType), typeDb);
+        }
+
+        DescriptorSetReflection bindlessDset{};
+        bindlessDset.name = "$Bindless";
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$SamplerHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::SAMPLER, SlangShaderResourceAccess::RO, 0},
+          SlangShaderResourceBinding{0, UINT64_MAX});
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$CombinedTextureSamplerHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER, SlangShaderResourceAccess::RO, 0},
+          SlangShaderResourceBinding{1, UINT64_MAX});
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$TextureHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::TEXTURE, SlangShaderResourceAccess::RO, 0},
+          SlangShaderResourceBinding{2, UINT64_MAX});
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$RWTextureHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::TEXTURE, SlangShaderResourceAccess::RW, 0},
+          SlangShaderResourceBinding{2, UINT64_MAX});
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$BufferHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::BUFFER, SlangShaderResourceAccess::RO, 0},
+          SlangShaderResourceBinding{2, UINT64_MAX});
+        bindlessDset.resources.emplace_back(
+          "$Bindless::$RWBufferHeap",
+          SlangShaderResourceDesc{
+            SlangShaderResourceType::BUFFER, SlangShaderResourceAccess::RW, 0},
+          SlangShaderResourceBinding{2, UINT64_MAX});
+        bindlessDset.index = BINDLESS_SPACE;
+        bindlessDset.typeId = typeDb.bindlessTypeId;
+
+        shaderReflection.dsets.push_back(std::move(bindlessDset));
       }
     }
+
+    merge_shader_reflection(combinedShaderReflection, shaderReflection, typeDb);
 
     if (!spvTools.Validate(
           (const uint32_t*)spirvCode->getBufferPointer(),

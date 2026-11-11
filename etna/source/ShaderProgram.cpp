@@ -410,7 +410,7 @@ void ShaderProgramManager::ShaderProgramInternal::reloadCombined(
     auto name = rebase_ser_string(dset.name, data.data());
 
     auto [parsetId, dsInfo] = parameterSetCache.parseRootParameterSet(
-      resources, name, typeRemap[dset.typeId], stageMask, descriptorLayoutCache);
+      resources, typeRemap[dset.typeId], stageMask, descriptorLayoutCache);
 
     usedDescriptors.set(dset.index);
     dstDescriptors[dset.index] = dsInfo;

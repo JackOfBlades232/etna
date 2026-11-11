@@ -121,7 +121,6 @@ struct SlangShaderReflectionHeader
   uint64_t numThreadsX;
   uint64_t numThreadsY;
   uint64_t numThreadsZ;
-  uint64_t bindlessSpace;
 };
 
 struct SlangShaderModuleRef

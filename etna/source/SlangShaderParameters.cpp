@@ -202,7 +202,6 @@ static bool compare_loaded_parset(
 
 ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParameterSet(
   std::span<const SlangShaderResourceReflection> resources,
-  std::string_view name,
   TypeId type_id,
   vk::ShaderStageFlags stage_mask,
   DescriptorSetLayoutCache& layout_cache)
@@ -215,12 +214,10 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
       continue;
     }
 
-    parameterSetMap.emplace(std::string{name}, ParameterSetId(i));
     return {ParameterSetId(i), layout_cache.getLayoutInfo(parset.dsetLayoutId)};
   }
 
   ParameterSetId retId = ParameterSetId(parameterSets.size());
-  parameterSetMap.emplace(std::string{name}, retId);
 
   auto& parset = parameterSets.emplace_back();
   parset.typeId = type_id;

@@ -124,7 +124,6 @@ class ParameterSetCache
   std::vector<Type> types;
   std::vector<uint64_t> typeHashes;
   std::vector<ParameterSet> parameterSets;
-  std::unordered_map<std::string, ParameterSetId> parameterSetMap;
 
 public:
   ParameterSetCache()
@@ -141,7 +140,6 @@ public:
 
   RootParameterSetParseResult parseRootParameterSet(
     std::span<const SlangShaderResourceReflection> resources,
-    std::string_view name,
     TypeId type_id,
     vk::ShaderStageFlags stage_mask,
     DescriptorSetLayoutCache& layout_cache);
