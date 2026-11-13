@@ -73,6 +73,7 @@ struct DsetBindingDesc
   std::vector<Binding> bindings;
 };
 
+// @TODO: this is more properly named "binding builder" as it's valid for updates as well
 class DsetBindingBuilder
 {
   const ParameterSetCache* cache = nullptr;
@@ -86,19 +87,19 @@ class DsetBindingBuilder
 public:
   DsetBindingBuilder& setTex(
     std::string_view name,
-    etna::ImageBinding&& value,
+    ImageBinding&& value,
     std::initializer_list<uint32_t> local_array_indices = {});
   DsetBindingBuilder& setSmp(
     std::string_view name,
-    etna::SamplerBinding&& value,
+    SamplerBinding&& value,
     std::initializer_list<uint32_t> local_array_indices = {});
   DsetBindingBuilder& setBuf(
     std::string_view name,
-    etna::BufferBinding&& value,
+    BufferBinding&& value,
     std::initializer_list<uint32_t> local_array_indices = {});
   DsetBindingBuilder& setCbuf(
     std::string_view name,
-    etna::BufferBinding&& value,
+    BufferBinding&& value,
     std::initializer_list<uint32_t> local_array_indices = {});
 
   DsetBindingBuilder subtype(
@@ -119,11 +120,34 @@ private:
     std::initializer_list<uint32_t> indices, const Field& field, std::string_view name) const;
 };
 
+class BindlessDsetBindingBuilder
+{
+  const ParameterSetCache* cache = nullptr;
+  ParameterSetId parsetId = ParameterSetId::INVALID;
+  TypeId typeId = TypeId::INVALID;
+  std::vector<Binding> builtBindings{};
+
+public:
+  BindlessDsetBindingBuilder& setTex(uint32_t index, ImageBinding&& value);
+  BindlessDsetBindingBuilder& setSmp(uint32_t index, SamplerBinding&& value);
+  BindlessDsetBindingBuilder& setBuf(uint32_t index, BufferBinding&& value);
+
+  DsetBindingDesc build();
+
+private:
+  friend class ParameterSetCache;
+
+  BindlessDsetBindingBuilder() = default;
+  BindlessDsetBindingBuilder(const ParameterSetCache& cache, ParameterSetId parset_id);
+};
+
 class ParameterSetCache
 {
   std::vector<Type> types;
   std::vector<uint64_t> typeHashes;
   std::vector<ParameterSet> parameterSets;
+  ParameterSetId bindlessParsetId = ParameterSetId::INVALID;
+  TypeId bindlessTypeId = TypeId::INVALID;
 
 public:
   ParameterSetCache()
@@ -143,6 +167,7 @@ public:
     TypeId type_id,
     vk::ShaderStageFlags stage_mask,
     DescriptorSetLayoutCache& layout_cache);
+
   std::vector<TypeId> addTypes(const SlangShaderTypeDatabase& db, const char* blob);
 
   TypeId getRootTypeId(ParameterSetId parset_id) const
@@ -169,6 +194,8 @@ public:
     ETNA_VERIFYF(it != type.fields.end(), "{} is not a field of type {}", name, size_t(type_id));
     return it->second;
   }
+
+  BindlessDsetBindingBuilder bindlessDsetBuilder() const;
 };
 
 } // namespace etna

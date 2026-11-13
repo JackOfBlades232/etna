@@ -1025,6 +1025,8 @@ static void prune_unreferenced_types(TypeDb& type_db, ShaderReflection& shader)
         f.subtypeId = remap[f.subtypeId];
     }
   }
+  if (type_db.bindlessTypeId != UINT64_MAX)
+    newDb.bindlessTypeId = remap[type_db.bindlessTypeId];
   type_db = std::move(newDb);
   for (auto& dset : shader.dsets)
   {
@@ -1097,6 +1099,7 @@ static void serialize_shader_reflection(
       slang_shader_ser_write_typed_array<SlangShaderTypeReflection>(serializedTypes, sctx);
     header.typeDb.typeHashes =
       slang_shader_ser_write_typed_array<uint64_t>(type_db.typeHashes, sctx);
+    header.typeDb.bindlessTypeId = type_db.bindlessTypeId + 1;
   }
 }
 
@@ -1157,8 +1160,8 @@ int SlangCompiler::compile(
         componentTypes.size(),
         composedProgram.writeRef(),
         diagnosticsBlob.writeRef());
-      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-      if (!SLANG_SUCCEEDED(result))
+      diagnose_if_needed(diagnosticsBlob, SLANG_FAILED(result));
+      if (SLANG_FAILED(result))
       {
         spdlog::error("Can't compose program with entrypoint {} from {}", ep, source.string());
         return -3;
@@ -1170,8 +1173,8 @@ int SlangCompiler::compile(
       Slang::ComPtr<slang::IBlob> diagnosticsBlob;
       SlangResult result =
         composedProgram->link(linkedProgram.writeRef(), diagnosticsBlob.writeRef());
-      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-      if (!SLANG_SUCCEEDED(result))
+      diagnose_if_needed(diagnosticsBlob, SLANG_FAILED(result));
+      if (SLANG_FAILED(result))
       {
         spdlog::error("Can't link program with entrypoint {} from {}", ep, source.string());
         return -3;
@@ -1256,8 +1259,8 @@ int SlangCompiler::compile(
       Slang::ComPtr<slang::IBlob> diagnosticsBlob;
       SlangResult result =
         linkedProgram->getEntryPointCode(0, 0, spirvCode.writeRef(), diagnosticsBlob.writeRef());
-      diagnose_if_needed(diagnosticsBlob, !SLANG_SUCCEEDED(result));
-      if (!SLANG_SUCCEEDED(result))
+      diagnose_if_needed(diagnosticsBlob, SLANG_FAILED(result));
+      if (SLANG_FAILED(result))
       {
         spdlog::error(
           "Can't generate spirv for program with entrypoint {} from {}", ep, source.string());
@@ -1266,12 +1269,23 @@ int SlangCompiler::compile(
     }
 
     {
-      slang::IBindlessResourceMetadata* bindlessMd = nullptr;
-      if (
-        SLANG_SUCCEEDED(linkedProgram->queryInterface(
-          slang::SLANG_UUID_IBindlessResourceMetadata, (void**)&bindlessMd)) &&
-        bindlessMd->usesBindlessResourceHeap())
+      Slang::ComPtr<slang::IMetadata> targetMd;
+      Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+      SlangResult result =
+        linkedProgram->getTargetMetadata(0, targetMd.writeRef(), diagnosticsBlob.writeRef());
+      diagnose_if_needed(diagnosticsBlob, SLANG_FAILED(result));
+      if (SLANG_FAILED(result))
       {
+        spdlog::error(
+          "Can't get target metadata for program with entrypoint {} from {}", ep, source.string());
+        return -3;
+      }
+      auto* bindlessMd = static_cast<slang::IBindlessResourceMetadata*>(
+        targetMd->castAs(slang::IBindlessResourceMetadata::getTypeGuid()));
+      if (bindlessMd && bindlessMd->usesBindlessResourceHeap())
+      {
+        assert(progLayout->getBindlessSpaceIndex() == BINDLESS_SPACE);
+
         if (typeDb.bindlessTypeId == UINT64_MAX)
         {
           TypeReflection bindlessType{};

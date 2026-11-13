@@ -183,6 +183,15 @@ void DescriptorSetInfo::parseReflection(
   }
 }
 
+void DescriptorSetInfo::parseBindlessReflection(
+  std::span<const SlangShaderResourceReflection> resources)
+{
+  // @TODO: build mutable and singular API bindings
+
+  ETNA_ASSERTF(0, "TODO");
+  (void)resources;
+}
+
 void DescriptorSetInfo::merge(const DescriptorSetInfo& info)
 {
   if (hasDynDescriptorArray || info.hasDynDescriptorArray)

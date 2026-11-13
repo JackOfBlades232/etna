@@ -47,9 +47,7 @@ uint32_t DsetBindingBuilder::buildFlatArrayIndex(
 }
 
 DsetBindingBuilder& DsetBindingBuilder::setTex(
-  std::string_view name,
-  etna::ImageBinding&& value,
-  std::initializer_list<uint32_t> local_array_indices)
+  std::string_view name, ImageBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
   ETNA_ASSERTF(
@@ -75,7 +73,7 @@ DsetBindingBuilder& DsetBindingBuilder::setTex(
 
 DsetBindingBuilder& DsetBindingBuilder::setSmp(
   std::string_view name,
-  etna::SamplerBinding&& value,
+  SamplerBinding&& value,
   std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
@@ -92,9 +90,7 @@ DsetBindingBuilder& DsetBindingBuilder::setSmp(
 }
 
 DsetBindingBuilder& DsetBindingBuilder::setBuf(
-  std::string_view name,
-  etna::BufferBinding&& value,
-  std::initializer_list<uint32_t> local_array_indices)
+  std::string_view name, BufferBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
   ETNA_ASSERTF(field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a buffer", name);
@@ -108,9 +104,7 @@ DsetBindingBuilder& DsetBindingBuilder::setBuf(
 }
 
 DsetBindingBuilder& DsetBindingBuilder::setCbuf(
-  std::string_view name,
-  etna::BufferBinding&& value,
-  std::initializer_list<uint32_t> local_array_indices)
+  std::string_view name, BufferBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
   ETNA_ASSERTF(
@@ -174,6 +168,70 @@ DsetBindingBuilder::DsetBindingBuilder(
 {
 }
 
+BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setTex(uint32_t index, ImageBinding&& value)
+{
+  if (value.descriptor_info.sampler)
+  {
+    const auto& field = cache->getTypeField(typeId, "$CombinedTextureSamplerHeap");
+    ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+    const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
+    ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER);
+    ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+    builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
+  }
+  else
+  {
+    const auto& field = cache->getTypeField(typeId, "$TextureHeap");
+    ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+    const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
+    ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::TEXTURE);
+    ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+    builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
+  }
+  return *this;
+}
+
+BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setSmp(
+  uint32_t index, SamplerBinding&& value)
+{
+  const auto& field = cache->getTypeField(typeId, "$SamplerHeap");
+  ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+  const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
+  ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::SAMPLER);
+  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+  builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
+  return *this;
+}
+
+BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setBuf(
+  uint32_t index, BufferBinding&& value)
+{
+  const auto& field = cache->getTypeField(typeId, "$BufferHeap"); // Aliased with $RWBufferHeap
+  ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+  const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
+  ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::BUFFER);
+  builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
+  return *this;
+}
+
+DsetBindingDesc BindlessDsetBindingBuilder::build()
+{
+  DsetBindingDesc desc{};
+  desc.parsetId = parsetId;
+  desc.dsetLayoutId = cache->getRootDsetLayoutId(parsetId);
+  desc.bindings = std::move(builtBindings); // @TODO: validate completeness?
+  *this = {};
+  return desc;
+}
+
+BindlessDsetBindingBuilder::BindlessDsetBindingBuilder(
+  const ParameterSetCache& cache, ParameterSetId parset_id)
+  : cache{&cache}
+  , parsetId{parset_id}
+  , typeId{cache.getRootTypeId(parset_id)}
+{
+}
+
 static bool compare_loaded_parset(
   std::span<const SlangShaderResourceReflection> resources,
   TypeId type_id,
@@ -206,6 +264,16 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   vk::ShaderStageFlags stage_mask,
   DescriptorSetLayoutCache& layout_cache)
 {
+  auto handleBindless = [&](ParameterSetId assigned_id) {
+    if (type_id == bindlessTypeId)
+    {
+      if (bindlessParsetId == ParameterSetId::INVALID)
+        ETNA_VERIFY(assigned_id == bindlessParsetId);
+      else
+        bindlessParsetId = assigned_id;
+    }
+  };
+
   for (size_t i = 0; const auto& parset : parameterSets)
   {
     if (!compare_loaded_parset(resources, type_id, stage_mask, parset))
@@ -214,6 +282,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
       continue;
     }
 
+    handleBindless(ParameterSetId(i));
     return {ParameterSetId(i), layout_cache.getLayoutInfo(parset.dsetLayoutId)};
   }
 
@@ -223,7 +292,10 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   parset.typeId = type_id;
 
   DescriptorSetInfo dsInfo;
-  dsInfo.parseReflection(stage_mask, resources);
+  if (type_id == bindlessTypeId)
+    dsInfo.parseBindlessReflection(resources);
+  else
+    dsInfo.parseReflection(stage_mask, resources);
 
   parset.dsetLayoutId = layout_cache.get(get_context().getDevice(), dsInfo).first;
 
@@ -233,6 +305,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
 
   parset.stageMask = stage_mask;
 
+  handleBindless(retId);
   return {retId, dsInfo};
 }
 
@@ -342,7 +415,25 @@ std::vector<TypeId> ParameterSetCache::addTypes(const SlangShaderTypeDatabase& d
     }
     ++i;
   }
+  if (db.bindlessTypeId)
+  {
+    if (bindlessTypeId != TypeId::INVALID)
+    {
+      ETNA_VERIFY(remapping[db.bindlessTypeId] == bindlessTypeId);
+      ETNA_VERIFY(getRootTypeId(bindlessParsetId) == bindlessTypeId);
+    }
+    else
+    {
+      bindlessTypeId = remapping[db.bindlessTypeId];
+    }
+  }
   return remapping;
+}
+
+BindlessDsetBindingBuilder ParameterSetCache::bindlessDsetBuilder() const
+{
+  ETNA_VERIFY(bindlessParsetId != ParameterSetId::INVALID);
+  return BindlessDsetBindingBuilder{*this, bindlessParsetId};
 }
 
 } // namespace etna

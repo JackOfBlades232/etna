@@ -128,10 +128,11 @@ DescriptorSet DynamicDescriptorPool::allocateSet(
 
 PersistentDescriptorPool::PersistentDescriptorPool(vk::Device dev)
   : vkDevice{dev}
-  , pool{unwrap_vk_result(dev.createDescriptorPoolUnique(vk::DescriptorPoolCreateInfo{
-      .maxSets = NUM_DESCRIPTORS,
-      .poolSizeCount = static_cast<std::uint32_t>(DEFAULT_POOL_SIZES.size()),
-      .pPoolSizes = DEFAULT_POOL_SIZES.data()}))}
+  , pool{unwrap_vk_result(dev.createDescriptorPoolUnique(
+      vk::DescriptorPoolCreateInfo{
+        .maxSets = NUM_DESCRIPTORS,
+        .poolSizeCount = static_cast<std::uint32_t>(DEFAULT_POOL_SIZES.size()),
+        .pPoolSizes = DEFAULT_POOL_SIZES.data()}))}
 {
 }
 
@@ -401,6 +402,12 @@ void PersistentDescriptorSet::updateBindings(std::span<Binding const> new_bindin
   }
 
   write_set(*this, new_bindings, allowUnboundSlots);
+}
+
+void PersistentDescriptorSet::updateBindings(const etna::DsetBindingDesc& binding_desc)
+{
+  ETNA_ASSERT(binding_desc.dsetLayoutId == layoutId);
+  updateBindings(binding_desc.bindings);
 }
 
 } // namespace etna

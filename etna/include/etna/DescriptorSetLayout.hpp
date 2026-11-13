@@ -29,6 +29,8 @@ struct DescriptorSetInfo
   void parseReflection(
     vk::ShaderStageFlags stage_mask,
     std::span<const SlangShaderResourceReflection> resources);
+  void parseBindlessReflection(
+    std::span<const SlangShaderResourceReflection> resources);
   void addResource(
     const vk::DescriptorSetLayoutBinding& binding, vk::DescriptorBindingFlags flags = {});
   void merge(const DescriptorSetInfo& info);

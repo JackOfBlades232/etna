@@ -111,6 +111,7 @@ struct SlangShaderTypeDatabase
 {
   SlangShaderTypedArrayRef<SlangShaderTypeReflection> types;
   SlangShaderTypedArrayRef<uint64_t> typeHashes;
+  uint64_t bindlessTypeId;
 };
 
 struct SlangShaderReflectionHeader

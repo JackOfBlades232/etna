@@ -16,6 +16,8 @@
 namespace etna
 {
 
+struct DsetBindingDesc;
+
 struct Binding
 {
   /*Todo: add resource wrappers*/
@@ -113,6 +115,7 @@ struct PersistentDescriptorSet
 
   // @NOTE: has to be called BEFORE binding the dset
   void updateBindings(std::span<Binding const> new_bindings);
+  void updateBindings(const etna::DsetBindingDesc& binding_desc);
 
 private:
   DescriptorLayoutId layoutId{};

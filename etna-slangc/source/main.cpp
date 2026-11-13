@@ -19,6 +19,15 @@ int main(int argc, char** argv)
   std::vector<std::string> entryPoints = {};
   SlangCompiler::CreateInfo slangCi{};
 
+  // @TEST
+  std::string commandline{argv[0]};
+  for (int i = 1; i < argc; ++i)
+  {
+    commandline += " ";
+    commandline += argv[i];
+  }
+  spdlog::info("{}", commandline);
+
   CommandlineParser cmdParser{CommandlineParser::CreateInfo{
     .args =
       {
