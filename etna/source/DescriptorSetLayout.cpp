@@ -43,7 +43,20 @@ void DescriptorSetInfo::addResource(
   bindingFlags[binding.binding] = flags;
 
   if (binding.binding + 1 > usedBindingsCap)
+  {
+    if (flags & vk::DescriptorBindingFlagBits::ePartiallyBound)
+    {
+      bindingFlags[binding.binding] |= vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+      if (usedBindingsCap > 0)
+        bindingFlags[getMaxBinding()] &= ~vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
+      hasDynDescriptorArrayAsLastBinding = true;
+    }
+    else
+    {
+      hasDynDescriptorArrayAsLastBinding = false;
+    }
     usedBindingsCap = binding.binding + 1;
+  }
 
   if (is_dynamic_descriptor(binding.descriptorType))
     dynOffsets++;
@@ -63,8 +76,6 @@ void DescriptorSetInfo::clear()
 void DescriptorSetInfo::parseShader(
   vk::ShaderStageFlagBits stage, const SpvReflectDescriptorSet& spv)
 {
-  uint32_t dynamicArrayBinding = uint32_t(-1);
-
   for (uint32_t i = 0u; i < spv.binding_count; i++)
   {
     const auto& spvBinding = *spv.bindings[i];
@@ -85,34 +96,8 @@ void DescriptorSetInfo::parseShader(
 
     if (apiBinding.descriptorCount == SPV_REFLECT_ARRAY_DIM_RUNTIME)
     {
-      if (hasDynDescriptorArray)
-      {
-        if (dynamicArrayBinding == apiBinding.binding)
-        {
-          continue;
-        }
-        else
-        {
-          ETNA_PANIC(
-            "DescriptorSetInfo: Only one dyn array binding allowed per set, but declared {} and {}",
-            getMaxBinding(),
-            apiBinding.binding);
-        }
-      }
-
       apiBinding.descriptorCount = get_num_descriptors_in_pool_for_type(apiBinding.descriptorType);
-      apiFlags |= vk::DescriptorBindingFlagBits::ePartiallyBound |
-        vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
-
-      hasDynDescriptorArray = true;
-      dynamicArrayBinding = apiBinding.binding;
-    }
-    else if (hasDynDescriptorArray && usedBindingsCap <= apiBinding.binding)
-    {
-      ETNA_PANIC(
-        "DescriptorSetInfo: dyn array binding {} must be last in set, but binding {} was declared",
-        getMaxBinding(),
-        apiBinding.binding);
+      apiFlags |= vk::DescriptorBindingFlagBits::ePartiallyBound;
     }
 
     addResource(apiBinding, apiFlags);
@@ -140,32 +125,11 @@ static vk::DescriptorType decriptor_type_from_desc(const SlangShaderResourceDesc
 void DescriptorSetInfo::parseReflection(
   vk::ShaderStageFlags stage_mask, std::span<const SlangShaderResourceReflection> resources)
 {
-  auto processDynArrayBinding = [this, dynamicArrayBinding = uint32_t(-1)](
-                                  auto& api_bind, auto& api_flags) mutable {
-    if (api_bind.descriptorCount == UINT64_MAX)
+  auto processDynArrayBinding = [](auto& api_bind, auto& api_flags) {
+    if (api_bind.descriptorCount == UINT32_MAX)
     {
-      if (hasDynDescriptorArray)
-      {
-        ETNA_ASSERT(dynamicArrayBinding != api_bind.binding);
-        ETNA_PANIC(
-          "DescriptorSetInfo: Only one dyn array binding allowed per set, but declared {} and {}",
-          getMaxBinding(),
-          api_bind.binding);
-      }
-
       api_bind.descriptorCount = get_num_descriptors_in_pool_for_type(api_bind.descriptorType);
-      api_flags |= vk::DescriptorBindingFlagBits::ePartiallyBound |
-        vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
-
-      hasDynDescriptorArray = true;
-      dynamicArrayBinding = api_bind.binding;
-    }
-    else if (hasDynDescriptorArray && usedBindingsCap <= api_bind.binding)
-    {
-      ETNA_PANIC(
-        "DescriptorSetInfo: dyn array binding {} must be last in set, but binding {} was declared",
-        getMaxBinding(),
-        api_bind.binding);
+      api_flags |= vk::DescriptorBindingFlagBits::ePartiallyBound;
     }
   };
 
@@ -183,40 +147,8 @@ void DescriptorSetInfo::parseReflection(
   }
 }
 
-void DescriptorSetInfo::parseBindlessReflection(
-  std::span<const SlangShaderResourceReflection> resources)
-{
-  // @TODO: build mutable and singular API bindings
-
-  ETNA_ASSERTF(0, "TODO");
-  (void)resources;
-}
-
 void DescriptorSetInfo::merge(const DescriptorSetInfo& info)
 {
-  if (hasDynDescriptorArray || info.hasDynDescriptorArray)
-  {
-    if (
-      hasDynDescriptorArray && info.hasDynDescriptorArray &&
-      usedBindingsCap != info.usedBindingsCap)
-    {
-      ETNA_PANIC(
-        "DescriptorSetInfo: can't merge two dsets with different dynamic array slots {} and {}",
-        getMaxBinding(),
-        info.getMaxBinding());
-    }
-    else if (
-      (!hasDynDescriptorArray && usedBindingsCap >= info.usedBindingsCap) ||
-      (!info.hasDynDescriptorArray && info.usedBindingsCap >= usedBindingsCap))
-    {
-      ETNA_PANIC(
-        "DescriptorSetInfo: can't merge two dsets with if dynamic array slot {} will not be max",
-        std::min(getMaxBinding(), info.getMaxBinding()));
-    }
-
-    hasDynDescriptorArray = true;
-  }
-
   for (uint32_t binding = 0; binding < info.usedBindingsCap; binding++)
   {
     if (!info.usedBindings.test(binding))
@@ -231,7 +163,7 @@ bool DescriptorSetInfo::operator==(const DescriptorSetInfo& rhs) const
     return false;
   if (usedBindings != rhs.usedBindings)
     return false;
-  if (hasDynDescriptorArray != rhs.hasDynDescriptorArray)
+  if (hasDynDescriptorArrayAsLastBinding != rhs.hasDynDescriptorArrayAsLastBinding)
     return false;
 
   for (uint32_t i = 0; i < usedBindingsCap; i++)
@@ -278,7 +210,7 @@ std::size_t DescriptorSetLayoutHash::operator()(const DescriptorSetInfo& res) co
 {
   size_t hash = 0;
 
-  hash_combine(hash, res.hasDynDescriptorArray);
+  hash_combine(hash, res.hasDynDescriptorArrayAsLastBinding);
 
   for (uint32_t i = 0; i < res.usedBindingsCap; i++)
   {

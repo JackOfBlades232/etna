@@ -60,10 +60,11 @@ static vk::DescriptorSet allocate_desciptor_set_from_pool(
 
   vk::DescriptorSetVariableDescriptorCountAllocateInfo dynCountInfo{};
   std::array dynCounts = {0u};
-  if (const auto& setInfo = dslCache.getLayoutInfo(layout_id); setInfo.hasDynamicDescriptorArray())
+  if (const auto& setInfo = dslCache.getLayoutInfo(layout_id);
+      setInfo.hasVariableCountDynDescriptorArray())
   {
     uint32_t arrBinding = setInfo.getMaxBinding();
-    uint32_t arrSizeCap = setInfo.getDynamicDescriptorArraySizeCap();
+    uint32_t arrSizeCap = setInfo.variableCountDynDescriptorArraySizeCap();
 
     uint32_t count = 0;
 

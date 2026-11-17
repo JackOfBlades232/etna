@@ -27,10 +27,7 @@ struct DescriptorSetInfo
 {
   void parseShader(vk::ShaderStageFlagBits stage, const SpvReflectDescriptorSet& spv);
   void parseReflection(
-    vk::ShaderStageFlags stage_mask,
-    std::span<const SlangShaderResourceReflection> resources);
-  void parseBindlessReflection(
-    std::span<const SlangShaderResourceReflection> resources);
+    vk::ShaderStageFlags stage_mask, std::span<const SlangShaderResourceReflection> resources);
   void addResource(
     const vk::DescriptorSetLayoutBinding& binding, vk::DescriptorBindingFlags flags = {});
   void merge(const DescriptorSetInfo& info);
@@ -64,11 +61,11 @@ struct DescriptorSetInfo
     return bindingFlags.at(binding);
   }
 
-  bool hasDynamicDescriptorArray() const { return hasDynDescriptorArray; }
-  uint32_t getDynamicDescriptorArraySizeCap() const
+  bool hasVariableCountDynDescriptorArray() const { return hasDynDescriptorArrayAsLastBinding; }
+  uint32_t variableCountDynDescriptorArraySizeCap() const
   {
-    ETNA_VERIFY(hasDynamicDescriptorArray());
-    return getBinding(getMaxBinding()).descriptorCount;
+    ETNA_ASSERT(hasVariableCountDynDescriptorArray());
+    return bindings[getMaxBinding()].descriptorCount;
   }
 
 private:
@@ -79,8 +76,7 @@ private:
   std::array<vk::DescriptorSetLayoutBinding, MAX_DESCRIPTOR_BINDINGS> bindings{};
   std::array<vk::DescriptorBindingFlags, MAX_DESCRIPTOR_BINDINGS> bindingFlags{};
 
-  // If this is true, the array is guaranteed to be in the usedBindingsCap - 1 slot
-  bool hasDynDescriptorArray = false;
+  bool hasDynDescriptorArrayAsLastBinding = false;
 
   friend DescriptorSetLayoutHash;
 };

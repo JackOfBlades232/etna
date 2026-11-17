@@ -267,7 +267,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   auto handleBindless = [&](ParameterSetId assigned_id) {
     if (type_id == bindlessTypeId)
     {
-      if (bindlessParsetId == ParameterSetId::INVALID)
+      if (bindlessParsetId != ParameterSetId::INVALID)
         ETNA_VERIFY(assigned_id == bindlessParsetId);
       else
         bindlessParsetId = assigned_id;
@@ -292,10 +292,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   parset.typeId = type_id;
 
   DescriptorSetInfo dsInfo;
-  if (type_id == bindlessTypeId)
-    dsInfo.parseBindlessReflection(resources);
-  else
-    dsInfo.parseReflection(stage_mask, resources);
+  dsInfo.parseReflection(stage_mask, resources);
 
   parset.dsetLayoutId = layout_cache.get(get_context().getDevice(), dsInfo).first;
 

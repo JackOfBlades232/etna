@@ -1103,12 +1103,29 @@ static void serialize_shader_reflection(
   }
 }
 
+static constexpr std::string_view BUILTIN_MODULE =
+  R"(
+export func getDescriptorFromHandle<T>(handle: DescriptorHandle<T>) -> T where T : IOpaqueDescriptor
+{
+  return defaultGetDescriptorFromHandle(handle, BindlessDescriptorOptions.None);
+}
+)";
+
 int SlangCompiler::compile(
   const std::filesystem::path& source,
   std::span<const std::string> entry_points,
   const std::filesystem::path& dest,
   const std::filesystem::path& dest_depfile)
 {
+  {
+    Slang::ComPtr<slang::IBlob> diagnosticsBlob;
+    auto builtinModule = session->loadModuleFromSourceString(
+      "_builtin", "_builtin.slang", BUILTIN_MODULE.data(), diagnosticsBlob.writeRef());
+    diagnose_if_needed(diagnosticsBlob, builtinModule);
+    if (!builtinModule)
+      return -1;
+  }
+
   Slang::ComPtr<slang::IModule> slangModule;
 
   {
@@ -1321,17 +1338,17 @@ int SlangCompiler::compile(
           "$Bindless::$RWTextureHeap",
           SlangShaderResourceDesc{
             SlangShaderResourceType::TEXTURE, SlangShaderResourceAccess::RW, 0},
-          SlangShaderResourceBinding{2, UINT64_MAX});
+          SlangShaderResourceBinding{3, UINT64_MAX});
         bindlessDset.resources.emplace_back(
           "$Bindless::$BufferHeap",
           SlangShaderResourceDesc{
             SlangShaderResourceType::BUFFER, SlangShaderResourceAccess::RO, 0},
-          SlangShaderResourceBinding{2, UINT64_MAX});
+          SlangShaderResourceBinding{6, UINT64_MAX});
         bindlessDset.resources.emplace_back(
           "$Bindless::$RWBufferHeap",
           SlangShaderResourceDesc{
             SlangShaderResourceType::BUFFER, SlangShaderResourceAccess::RW, 0},
-          SlangShaderResourceBinding{2, UINT64_MAX});
+          SlangShaderResourceBinding{7, UINT64_MAX});
         bindlessDset.index = BINDLESS_SPACE;
         bindlessDset.typeId = typeDb.bindlessTypeId;
 
@@ -1348,6 +1365,20 @@ int SlangCompiler::compile(
       spdlog::error(
         "Generated invalid spirv for program with entrypoint {} from {}", ep, source.string());
       return -3;
+    }
+
+    {
+      std::string disasm;
+      if (!spvTools.Disassemble(
+            (const uint32_t*)spirvCode->getBufferPointer(),
+            spirvCode->getBufferSize() / sizeof(uint32_t),
+            &disasm))
+      {
+        spdlog::error(
+          "Coudn't disassemble spirv for program with entrypoint {} from {}", ep, source.string());
+        return -3;
+      }
+      spdlog::info("Disasm for {}:\n{}\n", ep, disasm);
     }
 
     moduleDest->bytecode = slang_shader_ser_write_bytecode(
