@@ -1367,6 +1367,7 @@ int SlangCompiler::compile(
       return -3;
     }
 
+    if (0)
     {
       std::string disasm;
       if (!spvTools.Disassemble(
