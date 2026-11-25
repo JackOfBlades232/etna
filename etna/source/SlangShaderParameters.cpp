@@ -25,12 +25,12 @@ uint32_t DsetBindingBuilder::buildFlatArrayIndex(
 {
   if (field.localArrayDims.empty())
   {
-    ETNA_ASSERTF(indices.size() == 0, "\"{}\" is not an array field", name);
+    ETNA_VERIFYF(indices.size() == 0, "\"{}\" is not an array field", name);
     return arrayOffset;
   }
   else
   {
-    ETNA_ASSERTF(
+    ETNA_VERIFYF(
       field.localArrayDims.size() == indices.size(),
       "\"{}\" is an array field of different dimensionality {}",
       name,
@@ -50,22 +50,22 @@ DsetBindingBuilder& DsetBindingBuilder::setTex(
   std::string_view name, ImageBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
-  ETNA_ASSERTF(
+  ETNA_VERIFYF(
     field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a texture", name);
   const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
   if (value.descriptor_info.sampler)
   {
-    ETNA_ASSERTF(
+    ETNA_VERIFYF(
       desc.desc.type == SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER,
       "\"{}\" is not a combined image sampler",
       name);
   }
   else
   {
-    ETNA_ASSERTF(
+    ETNA_VERIFYF(
       desc.desc.type == SlangShaderResourceType::TEXTURE, "\"{}\" is not a texture", name);
   }
-  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  ETNA_VERIFY(arrayOffset < desc.binding.arraySize);
   builtBindings.emplace_back(
     desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
   return *this;
@@ -77,13 +77,13 @@ DsetBindingBuilder& DsetBindingBuilder::setSmp(
   std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
-  ETNA_ASSERTF(
+  ETNA_VERIFYF(
     field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a sampler", name);
-  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  ETNA_VERIFYF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
   const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
-  ETNA_ASSERTF(desc.desc.type == SlangShaderResourceType::SAMPLER, "\"{}\" is not a sampler", name);
-  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
-  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  ETNA_VERIFYF(desc.desc.type == SlangShaderResourceType::SAMPLER, "\"{}\" is not a sampler", name);
+  ETNA_VERIFY(desc.desc.access == SlangShaderResourceAccess::RO);
+  ETNA_VERIFY(arrayOffset < desc.binding.arraySize);
   builtBindings.emplace_back(
     desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
   return *this;
@@ -93,11 +93,11 @@ DsetBindingBuilder& DsetBindingBuilder::setBuf(
   std::string_view name, BufferBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
-  ETNA_ASSERTF(field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a buffer", name);
-  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  ETNA_VERIFYF(field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a buffer", name);
+  ETNA_VERIFYF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
   const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
-  ETNA_ASSERTF(desc.desc.type == SlangShaderResourceType::BUFFER, "\"{}\" is not a buffer", name);
-  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  ETNA_VERIFYF(desc.desc.type == SlangShaderResourceType::BUFFER, "\"{}\" is not a buffer", name);
+  ETNA_VERIFY(arrayOffset < desc.binding.arraySize);
   builtBindings.emplace_back(
     desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
   return *this;
@@ -107,14 +107,14 @@ DsetBindingBuilder& DsetBindingBuilder::setCbuf(
   std::string_view name, BufferBinding&& value, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
-  ETNA_ASSERTF(
+  ETNA_VERIFYF(
     field.subtypeId == TypeId::INVALID, "\"{}\" is a subtype field, not a constbuffer", name);
-  ETNA_ASSERTF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
+  ETNA_VERIFYF(field.localArrayDims.empty(), "\"{}\" is an array field", name);
   const auto& desc = cache->getResourceDesc(parsetId, offset + field.resourceOffset);
-  ETNA_ASSERTF(
+  ETNA_VERIFYF(
     desc.desc.type == SlangShaderResourceType::CONSTBUFFER, "\"{}\" is not a constbuffer", name);
-  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
-  ETNA_ASSERT(arrayOffset < desc.binding.arraySize);
+  ETNA_VERIFY(desc.desc.access == SlangShaderResourceAccess::RO);
+  ETNA_VERIFY(arrayOffset < desc.binding.arraySize);
   builtBindings.emplace_back(
     desc.binding.binding, std::move(value), buildFlatArrayIndex(local_array_indices, field, name));
   return *this;
@@ -124,8 +124,8 @@ DsetBindingBuilder DsetBindingBuilder::subtype(
   std::string_view name, std::initializer_list<uint32_t> local_array_indices)
 {
   const auto& field = cache->getTypeField(typeId, name);
-  ETNA_ASSERTF(field.subtypeId != TypeId::INVALID, "{} is a resource field, not a subtype", name);
-  ETNA_ASSERTF(field.localArrayDims.empty(), "{} is an array field", name);
+  ETNA_VERIFYF(field.subtypeId != TypeId::INVALID, "{} is a resource field, not a subtype", name);
+  ETNA_VERIFYF(field.localArrayDims.empty(), "{} is an array field", name);
   return {
     *this,
     field.subtypeId,
@@ -135,13 +135,13 @@ DsetBindingBuilder DsetBindingBuilder::subtype(
 
 DsetBindingBuilder& DsetBindingBuilder::end()
 {
-  ETNA_ASSERT(parent);
+  ETNA_VERIFY(parent);
   return *parent;
 }
 
 DsetBindingDesc DsetBindingBuilder::build()
 {
-  ETNA_ASSERT(!parent);
+  ETNA_VERIFY(!parent);
   DsetBindingDesc desc{};
   desc.parsetId = parsetId;
   desc.dsetLayoutId = cache->getRootDsetLayoutId(parsetId);
@@ -173,19 +173,19 @@ BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setTex(uint32_t index, I
   if (value.descriptor_info.sampler)
   {
     const auto& field = cache->getTypeField(typeId, "$CombinedTextureSamplerHeap");
-    ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+    ETNA_VERIFY(field.subtypeId == TypeId::INVALID);
     const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
-    ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER);
-    ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+    ETNA_VERIFY(desc.desc.type == SlangShaderResourceType::COMBINED_TEXTURE_SAMPLER);
+    ETNA_VERIFY(desc.desc.access == SlangShaderResourceAccess::RO);
     builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
   }
   else
   {
     const auto& field = cache->getTypeField(typeId, "$TextureHeap");
-    ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+    ETNA_VERIFY(field.subtypeId == TypeId::INVALID);
     const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
-    ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::TEXTURE);
-    ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+    ETNA_VERIFY(desc.desc.type == SlangShaderResourceType::TEXTURE);
+    ETNA_VERIFY(desc.desc.access == SlangShaderResourceAccess::RO);
     builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
   }
   return *this;
@@ -195,10 +195,10 @@ BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setSmp(
   uint32_t index, SamplerBinding&& value)
 {
   const auto& field = cache->getTypeField(typeId, "$SamplerHeap");
-  ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+  ETNA_VERIFY(field.subtypeId == TypeId::INVALID);
   const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
-  ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::SAMPLER);
-  ETNA_ASSERT(desc.desc.access == SlangShaderResourceAccess::RO);
+  ETNA_VERIFY(desc.desc.type == SlangShaderResourceType::SAMPLER);
+  ETNA_VERIFY(desc.desc.access == SlangShaderResourceAccess::RO);
   builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
   return *this;
 }
@@ -207,9 +207,9 @@ BindlessDsetBindingBuilder& BindlessDsetBindingBuilder::setBuf(
   uint32_t index, BufferBinding&& value)
 {
   const auto& field = cache->getTypeField(typeId, "$BufferHeap"); // Aliased with $RWBufferHeap
-  ETNA_ASSERT(field.subtypeId == TypeId::INVALID);
+  ETNA_VERIFY(field.subtypeId == TypeId::INVALID);
   const auto& desc = cache->getResourceDesc(parsetId, field.resourceOffset);
-  ETNA_ASSERT(desc.desc.type == SlangShaderResourceType::BUFFER);
+  ETNA_VERIFY(desc.desc.type == SlangShaderResourceType::BUFFER);
   builtBindings.emplace_back(desc.binding.binding, std::move(value), uint64_t(index));
   return *this;
 }
@@ -267,6 +267,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   auto handleBindless = [&](ParameterSetId assigned_id) {
     if (type_id == bindlessTypeId)
     {
+      stage_mask = vk::ShaderStageFlagBits::eAll;
       if (bindlessParsetId != ParameterSetId::INVALID)
         ETNA_VERIFY(assigned_id == bindlessParsetId);
       else
@@ -287,6 +288,7 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
   }
 
   ParameterSetId retId = ParameterSetId(parameterSets.size());
+  handleBindless(retId);
 
   auto& parset = parameterSets.emplace_back();
   parset.typeId = type_id;
@@ -302,7 +304,6 @@ ParameterSetCache::RootParameterSetParseResult ParameterSetCache::parseRootParam
 
   parset.stageMask = stage_mask;
 
-  handleBindless(retId);
   return {retId, dsInfo};
 }
 

@@ -690,7 +690,7 @@ static void compile_dset_element(
     nestedDset.name = dsetName;
 
     slang::TypeLayoutReflection* implicitVarType = implicitVar->getTypeLayout();
-    auto slots = implicitVarType->getSize(slang::ParameterCategory::SubElementRegisterSpace);
+    [[maybe_unused]] auto slots = implicitVarType->getSize(slang::ParameterCategory::SubElementRegisterSpace);
     assert(slots == 1);
     assert(arraySize == 1);
 
